@@ -6,6 +6,7 @@ class Intrinsic(Enum):
     PUSH = auto()
     ADD = auto()
     SUB = auto()
+    EQUAL = auto()
     DUMP = auto()
 
 def push(x):
@@ -17,6 +18,9 @@ def add():
 def sub():
     return (Intrinsic.SUB,)
 
+def equal():
+    return (Intrinsic.EQUAL,)
+
 def dump():
     return (Intrinsic.DUMP,)
 
@@ -27,29 +31,10 @@ def usage(program_name):
     print("   com <file>  Compile the program")
 
 def callCmd(cmd):
-    print(cmd)
+    cmdStr = " ".join(cmd)
+    print(f"[CMD] {cmdStr}")
     subprocess.call(cmd)
 
-
-def simulate_program(program):
-    stack =[]
-    for op in program:
-        assert len(Intrinsic) == 4, "Exhaustive handling of operations"
-        if op[0] == Intrinsic.PUSH:
-            stack.append(op[1])
-
-        elif op[0] == Intrinsic.ADD:
-            a = stack.pop()
-            b = stack.pop()
-            stack.append(a+b)
-
-        elif op[0] == Intrinsic.SUB:
-            a = stack.pop()
-            b = stack.pop()
-            stack.append(b-a)
-
-        elif op[0] == Intrinsic.DUMP:
-            print(stack[-1])
 
 def find_col(line, start, predicate):
     while start < len(line) and predicate(line[start]):
@@ -74,12 +59,15 @@ def load_program(program_name):
 
     def parseTokenAsOp(token):
         file_path, row, col, word = token 
+        assert len(Intrinsic) == 5, "Exhaustive handling in parseTokenAsOp"
         if word == "+":
             return add()
         elif word == "-":
             return sub()
         elif word == ".":
             return dump()
+        elif word == "=":
+            return equal()
         else:
             try:
                 return push(int(word))
@@ -94,9 +82,10 @@ def compile_program(program, outFilePath):
         with open("static\startAsm.txt","r") as rf:
             text = rf.read()
         wf.write(text)
+
         #add implementation of logic
         for op in program:
-            assert len(Intrinsic) == 4, "Exhaustive handling of operations"
+            assert len(Intrinsic) == 5, "Exhaustive handling of operations whilst compiling"
             if op[0] == Intrinsic.PUSH:
                 wf.write(f"     ; -- push --\n")
                 wf.write(f"      push {op[1]}\n")
@@ -116,6 +105,18 @@ def compile_program(program, outFilePath):
                 wf.write("      sub eax, ebx\n")
                 wf.write("      push eax\n")
 
+            elif op[0] == Intrinsic.EQUAL:
+                wf.write(f"     ; -- equal --\n")
+                wf.write("      pop eax\n")
+                wf.write("      pop ebx\n")
+                wf.write("      .if eax == ebx\n")
+                wf.write("          push 1\n")
+                wf.write("      .else\n")
+                wf.write("          push 0\n")
+                wf.write("      .endif\n")
+
+                # assert False, "Not implemented equals yet"
+
             elif op[0] == Intrinsic.DUMP:
                 wf.write(f"     ; -- dump --\n")
                 wf.write("      pop eax\n")
@@ -129,6 +130,31 @@ def compile_program(program, outFilePath):
 
 
     # assert False, "compiler not implemented"
+
+def simulate_program(program):
+    stack = []
+    for op in program:
+        assert len(Intrinsic) == 5, "Exhaustive handling of operations whilst simulating"
+        if op[0] == Intrinsic.PUSH:
+            stack.append(op[1])
+
+        elif op[0] == Intrinsic.ADD:
+            a = stack.pop()
+            b = stack.pop()
+            stack.append(a+b)
+
+        elif op[0] == Intrinsic.SUB:
+            a = stack.pop()
+            b = stack.pop()
+            stack.append(b-a)
+        
+        elif op[0] == Intrinsic.EQUAL:
+            a = stack.pop()
+            b = stack.pop()
+            stack.append(int(a == b))
+
+        elif op[0] == Intrinsic.DUMP:
+            print(stack[-1])
 
 
 def main():
@@ -147,6 +173,7 @@ def main():
         simulate_program(program)
     
     if sys.argv[1] == "com":
+        print(f"[INFO] Generating {programName}.asm")
         compile_program(program,f"{programName}.asm")
         callCmd(["ml", "/c", "/Zd", "/coff", f"{programName}.asm"])
         callCmd(["Link", "/SUBSYSTEM:CONSOLE", f"{programName}.obj"])
