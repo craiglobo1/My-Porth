@@ -51,25 +51,43 @@ def simulate_program(program):
         elif op[0] == Intrinsic.DUMP:
             print(stack[-1])
 
+def find_col(line, start, predicate):
+    while start < len(line) and predicate(line[start]):
+        start += 1
+    return start
+
+def lex_line(line):
+    col = find_col(line, 0, lambda x: x.isspace())
+    while col < len(line):
+        col_end = find_col(line, col, lambda x: not x.isspace())
+        yield (col, line[col:col_end])
+        col = find_col(line, col_end, lambda x: x.isspace())
+
+
+def lex_file(file_path):
+    with open(file_path, "r") as f:
+        return [(file_path, row, col, token) 
+                for (row, line) in enumerate(f.readlines())
+                for (col, token) in lex_line(line)]
+
 def load_program(program_name):
 
-    def parseAsOp(word):
+    def parseTokenAsOp(token):
+        file_path, row, col, word = token 
         if word == "+":
             return add()
         elif word == "-":
             return sub()
         elif word == ".":
             return dump()
-        elif word.isnumeric():
-            return push(int(word))
+        else:
+            try:
+                return push(int(word))
+            except ValueError as err:
+                print(f"{file_path}:{row+1}:{col+1} {err}")
+                exit(1)
 
-
-    with open(program_name, "r") as rf:
-        text = rf.read()
-    
-    text = text.split()
-    program = [parseAsOp(op) for op in text]
-    return program
+    return [ parseTokenAsOp(token) for token in lex_file(program_name)]
 
 def compile_program(program, outFilePath):
     with open(outFilePath,"w+") as wf:
@@ -80,9 +98,11 @@ def compile_program(program, outFilePath):
         for op in program:
             assert len(Intrinsic) == 4, "Exhaustive handling of operations"
             if op[0] == Intrinsic.PUSH:
+                wf.write(f"     ; -- push --\n")
                 wf.write(f"      push {op[1]}\n")
 
             elif op[0] == Intrinsic.ADD:
+                wf.write(f"     ; -- add --\n")
                 wf.write("      pop eax\n")
                 wf.write("      pop ebx\n")
                 wf.write("      add eax, ebx\n")
@@ -90,14 +110,16 @@ def compile_program(program, outFilePath):
 
 
             elif op[0] == Intrinsic.SUB:
+                wf.write(f"     ; -- sub --\n")
                 wf.write("      pop ebx\n")
                 wf.write("      pop eax\n")
                 wf.write("      sub eax, ebx\n")
                 wf.write("      push eax\n")
 
             elif op[0] == Intrinsic.DUMP:
-                wf.write(" pop eax\n")
-                wf.write(" push eax\n")
+                wf.write(f"     ; -- dump --\n")
+                wf.write("      pop eax\n")
+                wf.write("      push eax\n")
                 wf.write("      lea edi, decimalstr\n")
                 wf.write("      call DUMP\n")
         
@@ -119,25 +141,16 @@ def main():
         exit(1)
 
     program = load_program(sys.argv[2])
-    # program = [
-    # push(20),
-    # push(70),
-    # sub(),
-    # dump(),
-    # push(10),
-    # push(20),
-    # add(),
-    # add(),
-    # dump()
-    # ]
+    programName = "main"
+
     if sys.argv[1] == "sim":
         simulate_program(program)
     
     if sys.argv[1] == "com":
-        compile_program(program,"main.asm")
-        callCmd(["ml", "/c", "/Zd", "/coff", "main.asm"])
-        callCmd(["Link", "/SUBSYSTEM:CONSOLE", "main.obj"])
-        callCmd(["main.exe"])
+        compile_program(program,f"{programName}.asm")
+        callCmd(["ml", "/c", "/Zd", "/coff", f"{programName}.asm"])
+        callCmd(["Link", "/SUBSYSTEM:CONSOLE", f"{programName}.obj"])
+        callCmd([f"{programName}.exe"])
         
 
 

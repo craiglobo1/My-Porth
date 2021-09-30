@@ -45,12 +45,34 @@ def arrayImp():
 # listBase()
 # listWithPtr()
 # arrayImp()
-def twos_comp(val, bits):
-    """compute the 2's complement of int value val"""
-    if (val & (1 << (bits - 1))) != 0: # if sign bit is set e.g., 8bit: 128-255
-        val = val - (1 << bits)        # compute negative value
-    return val       
+# def twos_comp(val, bits):
+#     """compute the 2's complement of int value val"""
+#     if (val & (1 << (bits - 1))) != 0: # if sign bit is set e.g., 8bit: 128-255
+#         val = val - (1 << bits)        # compute negative value
+#     return val       
 
-n1  = bin(4294967291)
-n2 =  bin(int('FFFFFFFF',16))
-print(int(n1,2)^int(n2,2))
+# n1  = bin(4294967291)
+# n2 =  bin(int('FFFFFFFF',16))
+# print(int(n1,2)^int(n2,2))
+
+
+def find_col(line, start, predicate):
+    while start < len(line) and predicate(line[start]):
+        start += 1
+    return start
+
+def lex_line(line):
+    col = find_col(line, 0, lambda x: x.isspace())
+    while col < len(line):
+        col_end = find_col(line, col, lambda x: not x.isspace())
+        yield (col, line[col:col_end])
+        col = find_col(line, col_end, lambda x: x.isspace())
+
+
+def lex_file(file_path):
+    with open(file_path, "r") as f:
+        return [(file_path, row, col, token) 
+                for (row, line) in enumerate(f.readlines())
+                for (col, token) in lex_line(line)]
+
+print(lex_file("./test.porth"))
