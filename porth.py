@@ -10,7 +10,8 @@ class Intrinsic(Enum):
     EQUAL = auto()
     DUMP = auto()
     IF = auto()
-    ENDIF = auto()
+    ELSE = auto()
+    END = auto()
 
 def push(x):
     return (Intrinsic.PUSH, x)
@@ -30,8 +31,11 @@ def dump():
 def iff():
     return (Intrinsic.IF,)
 
-def endif():
-    return (Intrinsic.ENDIF,)
+def elze():
+    return (Intrinsic.ELSE,)
+
+def end():
+    return (Intrinsic.END,)
 
 def usage(program_name):
     print("Usage: %s [OPTIONS] <SUBCOMMAND> [ARGS]" % program_name)
@@ -48,13 +52,23 @@ def callCmd(cmd):
 def crossreference_blocks(program):
     stack = []
     for i, op in enumerate(program):
-        assert len(Intrinsic) == 7 , "Exhaustive handling of ops in crossreference_blocks (not all ops handled only blocks)" 
+        assert len(Intrinsic) == 8 , "Exhaustive handling of ops in crossreference_blocks (not all ops handled only blocks)" 
         if op[0] == Intrinsic.IF:
             stack.append(i)
-        elif op[0] == Intrinsic.ENDIF:
+        
+        elif op[0] == Intrinsic.ELSE:
             if_i = stack.pop()
-            assert program[if_i][0] == Intrinsic.IF, "End can only close blocks for now"
+            assert program[if_i][0] == Intrinsic.IF, "`else` can only close `if` blocks"
             program[if_i] = (Intrinsic.IF, i)
+            stack.append(i)
+        
+        elif op[0] == Intrinsic.END:
+            block_i = stack.pop()
+            if program[block_i][0] == Intrinsic.IF or program[block_i][0] == Intrinsic.ELSE:
+                program[block_i] = (program[block_i][0], i)
+            else:
+                assert False, "`end` can only close `if` blocks"
+
     return program
             
 
@@ -81,7 +95,7 @@ def load_program(program_name):
 
     def parseTokenAsOp(token):
         file_path, row, col, word = token 
-        assert len(Intrinsic) == 7, "Exhaustive handling of op in parseTokenAsOp"
+        assert len(Intrinsic) == 8, "Exhaustive handling of op in parseTokenAsOp"
         if word == "+":
             return add()
         elif word == "-":
@@ -92,8 +106,10 @@ def load_program(program_name):
             return equal()
         elif word  == "if":
             return iff()
-        elif word == "endif":
-            return endif()
+        elif word == "else":
+            return elze()
+        elif word == "end":
+            return end()
         else:
             try:
                 return push(int(word))
@@ -111,7 +127,7 @@ def compile_program(program, outFilePath):
 
         #add implementation of logic
         for op in program:
-            assert len(Intrinsic) == 7, "Exhaustive handling of operations whilst compiling"
+            assert len(Intrinsic) == 8, "Exhaustive handling of operations whilst compiling"
             if op[0] == Intrinsic.PUSH:
                 wf.write(f"     ; -- push --\n")
                 wf.write(f"      push {op[1]}\n")
@@ -155,9 +171,13 @@ def compile_program(program, outFilePath):
                 wf.write("      pop eax\n")
                 wf.write("      .if eax == 1\n")
             
-            elif op[0] == Intrinsic.ENDIF:            
+            elif op[0] == Intrinsic.ELSE:
+                wf.write(f" ; -- else --\n")
+                wf.write("      .else\n")
+            
+            elif op[0] == Intrinsic.END:            
                 wf.write("      .endif\n")
-                wf.write(f" ; -- endif --\n")
+                wf.write(f" ; -- end --\n")
 
         
         with open("static\endAsm.txt","r") as rf:
@@ -173,7 +193,7 @@ def simulate_program(program):
     while i < len(program):
         op = program[i]
 
-        assert len(Intrinsic) == 7, "Exhaustive handling of operations whilst simulating"
+        assert len(Intrinsic) == 8, "Exhaustive handling of operations whilst simulating"
         if op[0] == Intrinsic.PUSH:
             stack.append(op[1])
 
@@ -194,11 +214,15 @@ def simulate_program(program):
 
         elif op[0] == Intrinsic.IF:
             a = stack.pop()
-            assert len(op) >= 2, "`if` does not have ref to endif of its block call crossreference_blocks"
+            assert len(op) >= 2, "`if` does not have ref to end of its block call crossreference_blocks"
             if a == 0:
                 i = op[1]
 
-        elif op[0] == Intrinsic.ENDIF:
+        elif op[0] == Intrinsic.ELSE:
+            assert len(op) >= 2, "`else` does not have ref to end of its block call crossreference_blocks"
+            i = op[1]
+
+        elif op[0] == Intrinsic.END:
             pass
 
 

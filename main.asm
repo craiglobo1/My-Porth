@@ -26,7 +26,7 @@
       add eax, ebx
       push eax
      ; -- push --
-      push 67
+      push 66
      ; -- equal --
       pop eax
       pop ebx
@@ -39,14 +39,39 @@
       pop eax
       .if eax == 1
      ; -- push --
-      push 69
+      push 1
+ ; -- if --
+      pop eax
+      .if eax == 1
+     ; -- push --
+      push 23
+     ; -- dump --
+      pop eax
+      push eax
+      lea edi, decimalstr
+      call DUMP
+ ; -- else --
+      .else
+     ; -- push --
+      push 67
      ; -- dump --
       pop eax
       push eax
       lea edi, decimalstr
       call DUMP
       .endif
- ; -- endif --
+ ; -- end --
+ ; -- else --
+      .else
+     ; -- push --
+      push 49
+     ; -- dump --
+      pop eax
+      push eax
+      lea edi, decimalstr
+      call DUMP
+      .endif
+ ; -- end --
       invoke ExitProcess, 0
   start ENDP
 
