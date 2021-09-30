@@ -1,3 +1,4 @@
+import enum
 import sys
 from enum import Enum,auto
 import subprocess
@@ -8,6 +9,8 @@ class Intrinsic(Enum):
     SUB = auto()
     EQUAL = auto()
     DUMP = auto()
+    IF = auto()
+    ENDIF = auto()
 
 def push(x):
     return (Intrinsic.PUSH, x)
@@ -24,6 +27,12 @@ def equal():
 def dump():
     return (Intrinsic.DUMP,)
 
+def iff():
+    return (Intrinsic.IF,)
+
+def endif():
+    return (Intrinsic.ENDIF,)
+
 def usage(program_name):
     print("Usage: %s [OPTIONS] <SUBCOMMAND> [ARGS]" % program_name)
     print("SUBCOMMAND:")
@@ -35,6 +44,19 @@ def callCmd(cmd):
     print(f"[CMD] {cmdStr}")
     subprocess.call(cmd)
 
+
+def crossreference_blocks(program):
+    stack = []
+    for i, op in enumerate(program):
+        assert len(Intrinsic) == 7 , "Exhaustive handling of ops in crossreference_blocks (not all ops handled only blocks)" 
+        if op[0] == Intrinsic.IF:
+            stack.append(i)
+        elif op[0] == Intrinsic.ENDIF:
+            if_i = stack.pop()
+            assert program[if_i][0] == Intrinsic.IF, "End can only close blocks for now"
+            program[if_i] = (Intrinsic.IF, i)
+    return program
+            
 
 def find_col(line, start, predicate):
     while start < len(line) and predicate(line[start]):
@@ -59,7 +81,7 @@ def load_program(program_name):
 
     def parseTokenAsOp(token):
         file_path, row, col, word = token 
-        assert len(Intrinsic) == 5, "Exhaustive handling in parseTokenAsOp"
+        assert len(Intrinsic) == 7, "Exhaustive handling of op in parseTokenAsOp"
         if word == "+":
             return add()
         elif word == "-":
@@ -68,6 +90,10 @@ def load_program(program_name):
             return dump()
         elif word == "=":
             return equal()
+        elif word  == "if":
+            return iff()
+        elif word == "endif":
+            return endif()
         else:
             try:
                 return push(int(word))
@@ -85,7 +111,7 @@ def compile_program(program, outFilePath):
 
         #add implementation of logic
         for op in program:
-            assert len(Intrinsic) == 5, "Exhaustive handling of operations whilst compiling"
+            assert len(Intrinsic) == 7, "Exhaustive handling of operations whilst compiling"
             if op[0] == Intrinsic.PUSH:
                 wf.write(f"     ; -- push --\n")
                 wf.write(f"      push {op[1]}\n")
@@ -123,6 +149,16 @@ def compile_program(program, outFilePath):
                 wf.write("      push eax\n")
                 wf.write("      lea edi, decimalstr\n")
                 wf.write("      call DUMP\n")
+            
+            elif op[0] == Intrinsic.IF:
+                wf.write(f" ; -- if --\n")
+                wf.write("      pop eax\n")
+                wf.write("      .if eax == 1\n")
+            
+            elif op[0] == Intrinsic.ENDIF:            
+                wf.write("      .endif\n")
+                wf.write(f" ; -- endif --\n")
+
         
         with open("static\endAsm.txt","r") as rf:
             text = rf.read()
@@ -133,8 +169,11 @@ def compile_program(program, outFilePath):
 
 def simulate_program(program):
     stack = []
-    for op in program:
-        assert len(Intrinsic) == 5, "Exhaustive handling of operations whilst simulating"
+    i = 0
+    while i < len(program):
+        op = program[i]
+
+        assert len(Intrinsic) == 7, "Exhaustive handling of operations whilst simulating"
         if op[0] == Intrinsic.PUSH:
             stack.append(op[1])
 
@@ -153,8 +192,20 @@ def simulate_program(program):
             b = stack.pop()
             stack.append(int(a == b))
 
+        elif op[0] == Intrinsic.IF:
+            a = stack.pop()
+            assert len(op) >= 2, "`if` does not have ref to endif of its block call crossreference_blocks"
+            if a == 0:
+                i = op[1]
+
+        elif op[0] == Intrinsic.ENDIF:
+            pass
+
+
         elif op[0] == Intrinsic.DUMP:
             print(stack[-1])
+
+        i += 1
 
 
 def main():
@@ -167,6 +218,7 @@ def main():
         exit(1)
 
     program = load_program(sys.argv[2])
+    program = crossreference_blocks(program)
     programName = "main"
 
     if sys.argv[1] == "sim":

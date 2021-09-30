@@ -35,11 +35,18 @@
       .else
           push 0
       .endif
+ ; -- if --
+      pop eax
+      .if eax == 1
+     ; -- push --
+      push 69
      ; -- dump --
       pop eax
       push eax
       lea edi, decimalstr
       call DUMP
+      .endif
+ ; -- endif --
       invoke ExitProcess, 0
   start ENDP
 
