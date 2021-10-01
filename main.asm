@@ -17,27 +17,17 @@
 
   start PROC
      ; -- push --
+      push 43
+     ; -- push --
       push 21
-     ; -- duplicate --
-     pop eax
-     push eax
-     push eax
-     ; -- dump --
+     ; -- greater than --
+      pop ebx
       pop eax
-      lea edi, decimalstr
-      call DUMP
-     ; -- duplicate --
-     pop eax
-     push eax
-     push eax
-     ; -- dump --
-      pop eax
-      lea edi, decimalstr
-      call DUMP
-     ; -- duplicate --
-     pop eax
-     push eax
-     push eax
+      .if eax > ebx
+          push 1
+      .else
+          push 0
+      .endif
      ; -- dump --
       pop eax
       lea edi, decimalstr

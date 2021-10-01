@@ -8,6 +8,8 @@ class Intrinsic(Enum):
     ADD = auto()
     SUB = auto()
     EQUAL = auto()
+    GT = auto()
+    LT = auto()
     DUMP = auto()
     IF = auto()
     ELSE = auto()
@@ -41,6 +43,12 @@ def end():
 def dup():
     return (Intrinsic.DUP,)
 
+def gt():
+    return (Intrinsic.GT,)
+
+def lt():
+    return (Intrinsic.LT,)
+
 def usage(program_name):
     print("Usage: %s [OPTIONS] <SUBCOMMAND> [ARGS]" % program_name)
     print("SUBCOMMAND:")
@@ -56,7 +64,7 @@ def callCmd(cmd):
 def crossreference_blocks(program):
     stack = []
     for i, op in enumerate(program):
-        assert len(Intrinsic) == 9 , "Exhaustive handling of ops in crossreference_blocks (not all ops handled only blocks)" 
+        assert len(Intrinsic) == 11 , "Exhaustive handling of ops in crossreference_blocks (not all ops handled only blocks)" 
         if op[0] == Intrinsic.IF:
             stack.append(i)
         
@@ -99,7 +107,7 @@ def load_program(program_name):
 
     def parseTokenAsOp(token):
         file_path, row, col, word = token 
-        assert len(Intrinsic) == 9, "Exhaustive handling of op in parseTokenAsOp"
+        assert len(Intrinsic) == 11, "Exhaustive handling of op in parseTokenAsOp"
         if word == "+":
             return add()
         elif word == "-":
@@ -108,6 +116,10 @@ def load_program(program_name):
             return dump()
         elif word == "=":
             return equal()
+        elif word == ">":
+            return gt()
+        elif word == "<":
+            return lt()
         elif word  == "if":
             return iff()
         elif word == "else":
@@ -133,7 +145,7 @@ def compile_program(program, outFilePath):
 
         #add implementation of logic
         for op in program:
-            assert len(Intrinsic) == 9, "Exhaustive handling of operations whilst compiling"
+            assert len(Intrinsic) == 11, "Exhaustive handling of operations whilst compiling"
             if op[0] == Intrinsic.PUSH:
                 wf.write(f"     ; -- push --\n")
                 wf.write(f"      push {op[1]}\n")
@@ -158,6 +170,26 @@ def compile_program(program, outFilePath):
                 wf.write("      pop eax\n")
                 wf.write("      pop ebx\n")
                 wf.write("      .if eax == ebx\n")
+                wf.write("          push 1\n")
+                wf.write("      .else\n")
+                wf.write("          push 0\n")
+                wf.write("      .endif\n")
+            
+            elif op[0] == Intrinsic.GT:
+                wf.write(f"     ; -- greater than --\n")
+                wf.write("      pop ebx\n")
+                wf.write("      pop eax\n")
+                wf.write("      .if eax > ebx\n")
+                wf.write("          push 1\n")
+                wf.write("      .else\n")
+                wf.write("          push 0\n")
+                wf.write("      .endif\n")
+                        
+            elif op[0] == Intrinsic.LT:
+                wf.write(f"     ; -- less than --\n")
+                wf.write("      pop ebx\n")
+                wf.write("      pop eax\n")
+                wf.write("      .if eax < ebx\n")
                 wf.write("          push 1\n")
                 wf.write("      .else\n")
                 wf.write("          push 0\n")
@@ -207,7 +239,7 @@ def simulate_program(program):
     while i < len(program):
         op = program[i]
 
-        assert len(Intrinsic) == 9, "Exhaustive handling of operations whilst simulating"
+        assert len(Intrinsic) == 11, "Exhaustive handling of operations whilst simulating"
         if op[0] == Intrinsic.PUSH:
             stack.append(op[1])
 
@@ -225,7 +257,15 @@ def simulate_program(program):
             a = stack.pop()
             b = stack.pop()
             stack.append(int(a == b))
+        elif op[0] == Intrinsic.GT:
+            b = stack.pop()
+            a = stack.pop()
+            stack.append(int(a > b))
 
+        elif op[0] == Intrinsic.LT:
+            b = stack.pop()
+            a = stack.pop()
+            stack.append(int(a < b))
         elif op[0] == Intrinsic.IF:
             a = stack.pop()
             assert len(op) >= 2, "`if` does not have ref to end of its block call crossreference_blocks"
