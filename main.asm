@@ -10,6 +10,7 @@
   includelib C:\masm32\lib\masm32.lib
 .data
     decimalstr db 16 DUP (0)  ; address to store dump values
+    whileCondition db 1 DUP (0)  ; address to store dump values
     negativeSign db "-", 0    ; negativeSign     
     nl DWORD 10               ; new line character in ascii
 
@@ -17,9 +18,15 @@
 
   start PROC
      ; -- push --
-      push 43
+      push 10
+ ; -- while --
+     WHILE_1:
+      ; -- duplicate --
+      pop eax
+      push eax
+      push eax
      ; -- push --
-      push 21
+      push 0
      ; -- greater than --
       pop ebx
       pop eax
@@ -28,10 +35,28 @@
       .else
           push 0
       .endif
-     ; -- dump --
+ ; -- do --
+      pop eax
+      cmp eax, 1
+      jne END_10
+      ; -- duplicate --
+      pop eax
+      push eax
+      push eax
+      ; -- dump --
       pop eax
       lea edi, decimalstr
       call DUMP
+     ; -- push --
+      push 1
+     ; -- sub --
+      pop ebx
+      pop eax
+      sub eax, ebx
+      push eax
+      jmp WHILE_1
+      END_10:
+ ; -- end while --
       invoke ExitProcess, 0
   start ENDP
 

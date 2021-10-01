@@ -13,6 +13,8 @@ class Intrinsic(Enum):
     DUMP = auto()
     IF = auto()
     ELSE = auto()
+    WHILE = auto()
+    DO = auto()
     END = auto()
     DUP = auto()
 
@@ -36,6 +38,12 @@ def iff():
 
 def elze():
     return (Intrinsic.ELSE,)
+
+def wile():
+    return (Intrinsic.WHILE,)
+
+def doo():
+    return (Intrinsic.DO,)
 
 def end():
     return (Intrinsic.END,)
@@ -64,7 +72,7 @@ def callCmd(cmd):
 def crossreference_blocks(program):
     stack = []
     for i, op in enumerate(program):
-        assert len(Intrinsic) == 11 , "Exhaustive handling of ops in crossreference_blocks (not all ops handled only blocks)" 
+        assert len(Intrinsic) == 13 , "Exhaustive handling of ops in crossreference_blocks (not all ops handled only blocks)" 
         if op[0] == Intrinsic.IF:
             stack.append(i)
         
@@ -78,9 +86,22 @@ def crossreference_blocks(program):
             block_i = stack.pop()
             if program[block_i][0] == Intrinsic.IF or program[block_i][0] == Intrinsic.ELSE:
                 program[block_i] = (program[block_i][0], i)
+
+            elif program[block_i][0] == Intrinsic.DO:
+                program[block_i] = (program[block_i][0], i)
+                block_i = stack.pop()
+
             else:
                 assert False, "`end` can only close `if` blocks"
 
+            if program[block_i][0] == Intrinsic.WHILE:
+                program[i] = (Intrinsic.END, block_i)
+
+        elif op[0] == Intrinsic.WHILE:
+            stack.append(i)
+
+        elif op[0] == Intrinsic.DO:
+            stack.append(i)
     return program
             
 
@@ -101,13 +122,13 @@ def lex_file(file_path):
     with open(file_path, "r") as f:
         return [(file_path, row, col, token) 
                 for (row, line) in enumerate(f.readlines())
-                for (col, token) in lex_line(line)]
+                for (col, token) in lex_line(line.split('//')[0])]
 
 def load_program(program_name):
 
     def parseTokenAsOp(token):
         file_path, row, col, word = token 
-        assert len(Intrinsic) == 11, "Exhaustive handling of op in parseTokenAsOp"
+        assert len(Intrinsic) == 13, "Exhaustive handling of op in parseTokenAsOp"
         if word == "+":
             return add()
         elif word == "-":
@@ -124,6 +145,10 @@ def load_program(program_name):
             return iff()
         elif word == "else":
             return elze()
+        elif word == "while":
+            return wile()
+        elif word == "do":
+            return doo()
         elif word == "end":
             return end()
         elif word == "dup":
@@ -144,8 +169,8 @@ def compile_program(program, outFilePath):
         wf.write(text)
 
         #add implementation of logic
-        for op in program:
-            assert len(Intrinsic) == 11, "Exhaustive handling of operations whilst compiling"
+        for i, op in enumerate(program):
+            assert len(Intrinsic) == 13, "Exhaustive handling of operations whilst compiling"
             if op[0] == Intrinsic.PUSH:
                 wf.write(f"     ; -- push --\n")
                 wf.write(f"      push {op[1]}\n")
@@ -198,7 +223,7 @@ def compile_program(program, outFilePath):
                 # assert False, "Not implemented equals yet"
 
             elif op[0] == Intrinsic.DUMP:
-                wf.write(f"     ; -- dump --\n")
+                wf.write(f"      ; -- dump --\n")
                 wf.write("      pop eax\n")
                 wf.write("      lea edi, decimalstr\n")
                 wf.write("      call DUMP\n")
@@ -207,22 +232,41 @@ def compile_program(program, outFilePath):
                 assert len(op) >= 2, "`if` does not have ref to `end` of its block call crossreference_blocks"
                 wf.write(f" ; -- if --\n")
                 wf.write("      pop eax\n")
+                wf.write("      push eax\n")
                 wf.write("      .if eax == 1\n")
             
             elif op[0] == Intrinsic.ELSE:
-                assert len(op) >= 2, "`if` does not have ref to `end` or `else` of its block call crossreference_blocks"
+                assert len(op) >= 2, "`if` does not have ref to `end` or `else` of its block call in crossreference_blocks"
                 wf.write(f" ; -- else --\n")
                 wf.write("      .else\n")
             
+            elif op[0] == Intrinsic.WHILE:
+                wf.write(f" ; -- while --\n")
+                wf.write(f"     WHILE_{i}:\n")
+
+            elif op[0] == Intrinsic.DO:
+                assert len(op) >= 2, "`do` does not have ref to `end` of its block call in crossreference_blocks"
+                wf.write(f" ; -- do --\n")
+                wf.write( "      pop eax\n")
+                wf.write( "      cmp eax, 1\n")
+                wf.write(f"      jne END_{op[1]}\n")
+                
+                
             elif op[0] == Intrinsic.END:
-                wf.write("      .endif\n")
-                wf.write(f" ; -- end --\n")
+                if len(op) >= 2:
+                    assert len(op) >= 2, "`end` does not have ref to `while` of its block call in crossreference_blocks"
+                    wf.write(f"      jmp WHILE_{op[1]}\n")
+                    wf.write(f"      END_{i}:\n")
+                    wf.write(f" ; -- end while --\n")
+                else:
+                    wf.write("      .endif\n")
+                    wf.write(f" ; -- end --\n")
 
             elif op[0] == Intrinsic.DUP:
-                wf.write(f"     ; -- duplicate --\n")
-                wf.write(f"     pop eax\n")
-                wf.write(f"     push eax\n")
-                wf.write(f"     push eax\n")
+                wf.write("      ; -- duplicate --\n")
+                wf.write("      pop eax\n")
+                wf.write("      push eax\n")
+                wf.write("      push eax\n")
 
 
         
@@ -239,7 +283,7 @@ def simulate_program(program):
     while i < len(program):
         op = program[i]
 
-        assert len(Intrinsic) == 11, "Exhaustive handling of operations whilst simulating"
+        assert len(Intrinsic) == 13, "Exhaustive handling of operations whilst simulating"
         if op[0] == Intrinsic.PUSH:
             stack.append(op[1])
 
@@ -267,7 +311,7 @@ def simulate_program(program):
             a = stack.pop()
             stack.append(int(a < b))
         elif op[0] == Intrinsic.IF:
-            a = stack.pop()
+            a = stack[-1]
             assert len(op) >= 2, "`if` does not have ref to end of its block call crossreference_blocks"
             if a == 0:
                 i = op[1]
@@ -276,8 +320,15 @@ def simulate_program(program):
             assert len(op) >= 2, "`else` does not have ref to end of its block call crossreference_blocks"
             i = op[1]
 
+        elif op[0] == Intrinsic.DO:
+            assert len(op) >= 2, "`do` does not have ref to end of its block call crossreference_blocks"
+            a = stack.pop()
+            if a == 0:
+                i = op[1]
+
         elif op[0] == Intrinsic.END:
-            pass
+            if len(op) >=2:
+                i = op[1]
 
         elif op[0] == Intrinsic.DUP:
             stack.append(stack[-1])

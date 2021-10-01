@@ -10,6 +10,7 @@
   includelib C:\masm32\lib\masm32.lib
 .data
     decimalstr db 16 DUP (0)  ; address to store dump values
+    whileCondition db 1 DUP (0)  ; address to store dump values
     negativeSign db "-", 0    ; negativeSign     
     nl DWORD 10               ; new line character in ascii
 
