@@ -17,61 +17,31 @@
 
   start PROC
      ; -- push --
-      push 34
-     ; -- push --
-      push 32
-     ; -- add --
-      pop eax
-      pop ebx
-      add eax, ebx
-      push eax
-     ; -- push --
-      push 66
-     ; -- equal --
-      pop eax
-      pop ebx
-      .if eax == ebx
-          push 1
-      .else
-          push 0
-      .endif
- ; -- if --
-      pop eax
-      .if eax == 1
-     ; -- push --
-      push 1
- ; -- if --
-      pop eax
-      .if eax == 1
-     ; -- push --
-      push 23
+      push 21
+     ; -- duplicate --
+     pop eax
+     push eax
+     push eax
      ; -- dump --
       pop eax
-      push eax
       lea edi, decimalstr
       call DUMP
- ; -- else --
-      .else
-     ; -- push --
-      push 67
+     ; -- duplicate --
+     pop eax
+     push eax
+     push eax
      ; -- dump --
       pop eax
-      push eax
       lea edi, decimalstr
       call DUMP
-      .endif
- ; -- end --
- ; -- else --
-      .else
-     ; -- push --
-      push 49
+     ; -- duplicate --
+     pop eax
+     push eax
+     push eax
      ; -- dump --
       pop eax
-      push eax
       lea edi, decimalstr
       call DUMP
-      .endif
- ; -- end --
       invoke ExitProcess, 0
   start ENDP
 

@@ -1,9 +1,4 @@
-34 32 + 66 = if
-    1 if
-        23 .
-    else
-        67 .
-    end
-else
-    49 .
-end
+21
+dup .
+dup .
+dup .

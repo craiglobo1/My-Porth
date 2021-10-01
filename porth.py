@@ -12,6 +12,7 @@ class Intrinsic(Enum):
     IF = auto()
     ELSE = auto()
     END = auto()
+    DUP = auto()
 
 def push(x):
     return (Intrinsic.PUSH, x)
@@ -37,6 +38,9 @@ def elze():
 def end():
     return (Intrinsic.END,)
 
+def dup():
+    return (Intrinsic.DUP,)
+
 def usage(program_name):
     print("Usage: %s [OPTIONS] <SUBCOMMAND> [ARGS]" % program_name)
     print("SUBCOMMAND:")
@@ -52,7 +56,7 @@ def callCmd(cmd):
 def crossreference_blocks(program):
     stack = []
     for i, op in enumerate(program):
-        assert len(Intrinsic) == 8 , "Exhaustive handling of ops in crossreference_blocks (not all ops handled only blocks)" 
+        assert len(Intrinsic) == 9 , "Exhaustive handling of ops in crossreference_blocks (not all ops handled only blocks)" 
         if op[0] == Intrinsic.IF:
             stack.append(i)
         
@@ -95,7 +99,7 @@ def load_program(program_name):
 
     def parseTokenAsOp(token):
         file_path, row, col, word = token 
-        assert len(Intrinsic) == 8, "Exhaustive handling of op in parseTokenAsOp"
+        assert len(Intrinsic) == 9, "Exhaustive handling of op in parseTokenAsOp"
         if word == "+":
             return add()
         elif word == "-":
@@ -110,6 +114,8 @@ def load_program(program_name):
             return elze()
         elif word == "end":
             return end()
+        elif word == "dup":
+            return dup()
         else:
             try:
                 return push(int(word))
@@ -127,7 +133,7 @@ def compile_program(program, outFilePath):
 
         #add implementation of logic
         for op in program:
-            assert len(Intrinsic) == 8, "Exhaustive handling of operations whilst compiling"
+            assert len(Intrinsic) == 9, "Exhaustive handling of operations whilst compiling"
             if op[0] == Intrinsic.PUSH:
                 wf.write(f"     ; -- push --\n")
                 wf.write(f"      push {op[1]}\n")
@@ -162,22 +168,30 @@ def compile_program(program, outFilePath):
             elif op[0] == Intrinsic.DUMP:
                 wf.write(f"     ; -- dump --\n")
                 wf.write("      pop eax\n")
-                wf.write("      push eax\n")
                 wf.write("      lea edi, decimalstr\n")
                 wf.write("      call DUMP\n")
             
             elif op[0] == Intrinsic.IF:
+                assert len(op) >= 2, "`if` does not have ref to `end` of its block call crossreference_blocks"
                 wf.write(f" ; -- if --\n")
                 wf.write("      pop eax\n")
                 wf.write("      .if eax == 1\n")
             
             elif op[0] == Intrinsic.ELSE:
+                assert len(op) >= 2, "`if` does not have ref to `end` or `else` of its block call crossreference_blocks"
                 wf.write(f" ; -- else --\n")
                 wf.write("      .else\n")
             
-            elif op[0] == Intrinsic.END:            
+            elif op[0] == Intrinsic.END:
                 wf.write("      .endif\n")
                 wf.write(f" ; -- end --\n")
+
+            elif op[0] == Intrinsic.DUP:
+                wf.write(f"     ; -- duplicate --\n")
+                wf.write(f"     pop eax\n")
+                wf.write(f"     push eax\n")
+                wf.write(f"     push eax\n")
+
 
         
         with open("static\endAsm.txt","r") as rf:
@@ -193,7 +207,7 @@ def simulate_program(program):
     while i < len(program):
         op = program[i]
 
-        assert len(Intrinsic) == 8, "Exhaustive handling of operations whilst simulating"
+        assert len(Intrinsic) == 9, "Exhaustive handling of operations whilst simulating"
         if op[0] == Intrinsic.PUSH:
             stack.append(op[1])
 
@@ -225,9 +239,12 @@ def simulate_program(program):
         elif op[0] == Intrinsic.END:
             pass
 
+        elif op[0] == Intrinsic.DUP:
+            stack.append(stack[-1])
 
         elif op[0] == Intrinsic.DUMP:
-            print(stack[-1])
+            a = stack.pop()
+            print(a)
 
         i += 1
 
