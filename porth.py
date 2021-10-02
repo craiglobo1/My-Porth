@@ -1,4 +1,13 @@
-import enum
+"""
+Program is a list of Ops
+Op is a dict with the follwing possible fields
+- `type` -- The type of the Op. One of Intrinsic.ADD, Intrinsic.LT, Intrinsic.IF etc
+- `loc` -- location of the Op in the program it contains (`file_name`,  `row`, `col`)
+- `value` -- Only exists for Intrinsic.PUSH. Contains the value to be pushed to stack
+- `jmp` -- It is an optional field and is used for code blocks like if,else, while, end etc. It is created in crossreference_blocks
+"""
+
+
 import sys
 from enum import Enum,auto
 import subprocess
@@ -17,45 +26,10 @@ class Intrinsic(Enum):
     DO = auto()
     END = auto()
     DUP = auto()
-
-def push(x):
-    return (Intrinsic.PUSH, x)
-
-def add():
-    return (Intrinsic.ADD,)
-
-def sub():
-    return (Intrinsic.SUB,)
-
-def equal():
-    return (Intrinsic.EQUAL,)
-
-def dump():
-    return (Intrinsic.DUMP,)
-
-def iff():
-    return (Intrinsic.IF,)
-
-def elze():
-    return (Intrinsic.ELSE,)
-
-def wile():
-    return (Intrinsic.WHILE,)
-
-def doo():
-    return (Intrinsic.DO,)
-
-def end():
-    return (Intrinsic.END,)
-
-def dup():
-    return (Intrinsic.DUP,)
-
-def gt():
-    return (Intrinsic.GT,)
-
-def lt():
-    return (Intrinsic.LT,)
+    MEM = auto()
+    STORE = auto()
+    LOAD = auto()
+    PRINT = auto()
 
 def usage(program_name):
     print("Usage: %s [OPTIONS] <SUBCOMMAND> [ARGS]" % program_name)
@@ -72,35 +46,38 @@ def callCmd(cmd):
 def crossreference_blocks(program):
     stack = []
     for i, op in enumerate(program):
-        assert len(Intrinsic) == 13 , "Exhaustive handling of ops in crossreference_blocks (not all ops handled only blocks)" 
-        if op[0] == Intrinsic.IF:
+        assert len(Intrinsic) == 17 , "Exhaustive handling of ops in crossreference_blocks (not all ops handled only blocks)" 
+        if op["type"] == Intrinsic.IF:
             stack.append(i)
         
-        elif op[0] == Intrinsic.ELSE:
+        elif op["type"] == Intrinsic.ELSE:
             if_i = stack.pop()
-            assert program[if_i][0] == Intrinsic.IF, "`else` can only close `if` blocks"
-            program[if_i] = (Intrinsic.IF, i)
+            if program[if_i]["type"] != Intrinsic.IF:
+                print("%s:%d:%d ERROR: `else` can only be used in `if`-blocks" % program[if_i]["loc"] )
+                exit(1)
+
+            program[if_i]["jmp"] = i
             stack.append(i)
         
-        elif op[0] == Intrinsic.END:
+        elif op["type"] == Intrinsic.END:
             block_i = stack.pop()
-            if program[block_i][0] == Intrinsic.IF or program[block_i][0] == Intrinsic.ELSE:
-                program[block_i] = (program[block_i][0], i)
+            if program[block_i]["type"] == Intrinsic.IF or program[block_i]["type"] == Intrinsic.ELSE:
+                program[block_i]["jmp"] = i
 
-            elif program[block_i][0] == Intrinsic.DO:
-                program[block_i] = (program[block_i][0], i)
+            elif program[block_i]["type"] == Intrinsic.DO:
+                program[block_i]["jmp"] = i
                 block_i = stack.pop()
 
             else:
                 assert False, "`end` can only close `if` blocks"
 
-            if program[block_i][0] == Intrinsic.WHILE:
-                program[i] = (Intrinsic.END, block_i)
+            if program[block_i]["type"] == Intrinsic.WHILE:
+                program[i]["jmp"] = block_i
 
-        elif op[0] == Intrinsic.WHILE:
+        elif op["type"] == Intrinsic.WHILE:
             stack.append(i)
 
-        elif op[0] == Intrinsic.DO:
+        elif op["type"] == Intrinsic.DO:
             stack.append(i)
     return program
             
@@ -127,37 +104,47 @@ def lex_file(file_path):
 def load_program(program_name):
 
     def parseTokenAsOp(token):
-        file_path, row, col, word = token 
-        assert len(Intrinsic) == 13, "Exhaustive handling of op in parseTokenAsOp"
+        file_path, row, col, word = token
+        row += 1
+        col += 1
+        assert len(Intrinsic) == 17, "Exhaustive handling of op in parseTokenAsOp"
         if word == "+":
-            return add()
+            return {"type": Intrinsic.ADD, "loc" : (file_path, row, col)}
         elif word == "-":
-            return sub()
-        elif word == ".":
-            return dump()
+            return {"type": Intrinsic.SUB, "loc" : (file_path, row, col)}
+        elif word == "dump":
+            return {"type": Intrinsic.DUMP, "loc" : (file_path, row, col)}
         elif word == "=":
-            return equal()
+            return {"type": Intrinsic.EQUAL, "loc" : (file_path, row, col)}
         elif word == ">":
-            return gt()
+            return {"type": Intrinsic.GT, "loc" : (file_path, row, col)}
         elif word == "<":
-            return lt()
+            return {"type": Intrinsic.LT, "loc" : (file_path, row, col)}
         elif word  == "if":
-            return iff()
+            return {"type": Intrinsic.IF, "loc" : (file_path, row, col)}
         elif word == "else":
-            return elze()
+            return {"type": Intrinsic.ELSE, "loc" : (file_path, row, col)}
         elif word == "while":
-            return wile()
+            return {"type": Intrinsic.WHILE, "loc" : (file_path, row, col)}
         elif word == "do":
-            return doo()
+            return {"type": Intrinsic.DO, "loc" : (file_path, row, col)}
         elif word == "end":
-            return end()
+            return {"type": Intrinsic.END, "loc" : (file_path, row, col)}
         elif word == "dup":
-            return dup()
+            return {"type": Intrinsic.DUP, "loc" : (file_path, row, col)}
+        elif word == "mem":
+            return {"type": Intrinsic.MEM, "loc" : (file_path, row, col)}
+        elif word == ".":
+            return {"type": Intrinsic.STORE, "loc": (file_path, row, col)}
+        elif word == ",":
+            return {"type": Intrinsic.LOAD, "loc": (file_path, row, col)}
+        elif word == "print":
+            return {"type": Intrinsic.PRINT, "loc" : (file_path, row, col)}
         else:
             try:
-                return push(int(word))
+                return {"type": Intrinsic.PUSH, "loc" : (file_path, row, col), "val" : int(word)}
             except ValueError as err:
-                print(f"{file_path}:{row+1}:{col+1} {err}")
+                print(f"{file_path}:{row}:{col} {err}")
                 exit(1)
 
     return [ parseTokenAsOp(token) for token in lex_file(program_name)]
@@ -170,12 +157,13 @@ def compile_program(program, outFilePath):
 
         #add implementation of logic
         for i, op in enumerate(program):
-            assert len(Intrinsic) == 13, "Exhaustive handling of operations whilst compiling"
-            if op[0] == Intrinsic.PUSH:
+            assert len(Intrinsic) == 17, "Exhaustive handling of operations whilst compiling"
+            if op["type"] == Intrinsic.PUSH:
+                valToPush = op["val"]
                 wf.write(f"     ; -- push --\n")
-                wf.write(f"      push {op[1]}\n")
+                wf.write(f"      push {valToPush}\n")
 
-            elif op[0] == Intrinsic.ADD:
+            elif op["type"] == Intrinsic.ADD:
                 wf.write(f"     ; -- add --\n")
                 wf.write("      pop eax\n")
                 wf.write("      pop ebx\n")
@@ -183,14 +171,14 @@ def compile_program(program, outFilePath):
                 wf.write("      push eax\n")
 
 
-            elif op[0] == Intrinsic.SUB:
+            elif op["type"] == Intrinsic.SUB:
                 wf.write(f"     ; -- sub --\n")
                 wf.write("      pop ebx\n")
                 wf.write("      pop eax\n")
                 wf.write("      sub eax, ebx\n")
                 wf.write("      push eax\n")
 
-            elif op[0] == Intrinsic.EQUAL:
+            elif op["type"] == Intrinsic.EQUAL:
                 wf.write(f"     ; -- equal --\n")
                 wf.write("      pop eax\n")
                 wf.write("      pop ebx\n")
@@ -200,7 +188,7 @@ def compile_program(program, outFilePath):
                 wf.write("          push 0\n")
                 wf.write("      .endif\n")
             
-            elif op[0] == Intrinsic.GT:
+            elif op["type"] == Intrinsic.GT:
                 wf.write(f"     ; -- greater than --\n")
                 wf.write("      pop ebx\n")
                 wf.write("      pop eax\n")
@@ -210,7 +198,7 @@ def compile_program(program, outFilePath):
                 wf.write("          push 0\n")
                 wf.write("      .endif\n")
                         
-            elif op[0] == Intrinsic.LT:
+            elif op["type"] == Intrinsic.LT:
                 wf.write(f"     ; -- less than --\n")
                 wf.write("      pop ebx\n")
                 wf.write("      pop eax\n")
@@ -220,55 +208,82 @@ def compile_program(program, outFilePath):
                 wf.write("          push 0\n")
                 wf.write("      .endif\n")
 
-                # assert False, "Not implemented equals yet"
 
-            elif op[0] == Intrinsic.DUMP:
+            elif op["type"] == Intrinsic.DUMP:
                 wf.write(f"      ; -- dump --\n")
                 wf.write("      pop eax\n")
                 wf.write("      lea edi, decimalstr\n")
                 wf.write("      call DUMP\n")
             
-            elif op[0] == Intrinsic.IF:
-                assert len(op) >= 2, "`if` does not have ref to `end` of its block call crossreference_blocks"
+            elif op["type"] == Intrinsic.IF:
+                if "jmp" not in op:
+                    print("%s:%d:%d ERROR: `if` can only be used when an `end` is mentioned" % program[i]["loc"])
+                    exit(1)
                 wf.write(f" ; -- if --\n")
                 wf.write("      pop eax\n")
                 wf.write("      push eax\n")
                 wf.write("      .if eax == 1\n")
             
-            elif op[0] == Intrinsic.ELSE:
-                assert len(op) >= 2, "`if` does not have ref to `end` or `else` of its block call in crossreference_blocks"
+            elif op["type"] == Intrinsic.ELSE:
+                if "jmp" not in op:
+                    print("%s:%d:%d ERROR: `else` can only be used when an `end` is mentioned" % program[i]["loc"])
+                    exit(1)
                 wf.write(f" ; -- else --\n")
                 wf.write("      .else\n")
             
-            elif op[0] == Intrinsic.WHILE:
+            elif op["type"] == Intrinsic.WHILE:
                 wf.write(f" ; -- while --\n")
                 wf.write(f"     WHILE_{i}:\n")
 
-            elif op[0] == Intrinsic.DO:
-                assert len(op) >= 2, "`do` does not have ref to `end` of its block call in crossreference_blocks"
+            elif op["type"] == Intrinsic.DO:
+                if "jmp" not in op:
+                    print("%s:%d:%d ERROR: `do` can only be used when an `end` is mentioned" % program[i]["loc"])
+                    exit(1)
+                jmp_idx = op["jmp"]
                 wf.write(f" ; -- do --\n")
                 wf.write( "      pop eax\n")
                 wf.write( "      cmp eax, 1\n")
-                wf.write(f"      jne END_{op[1]}\n")
+                wf.write(f"      jne END_{jmp_idx}\n")
                 
                 
-            elif op[0] == Intrinsic.END:
-                if len(op) >= 2:
-                    assert len(op) >= 2, "`end` does not have ref to `while` of its block call in crossreference_blocks"
-                    wf.write(f"      jmp WHILE_{op[1]}\n")
+            elif op["type"] == Intrinsic.END:
+                if "jmp" in op:
+                    jmp_idx = op["jmp"]
+                    wf.write(f"      jmp WHILE_{jmp_idx}\n")
                     wf.write(f"      END_{i}:\n")
                     wf.write(f" ; -- end while --\n")
                 else:
                     wf.write("      .endif\n")
                     wf.write(f" ; -- end --\n")
 
-            elif op[0] == Intrinsic.DUP:
+            elif op["type"] == Intrinsic.DUP:
                 wf.write("      ; -- duplicate --\n")
                 wf.write("      pop eax\n")
                 wf.write("      push eax\n")
                 wf.write("      push eax\n")
 
+            elif op["type"] == Intrinsic.MEM:
+                wf.write("      ;-- mem --\n")
+                wf.write("      lea edi, mem\n")
+                wf.write("      push edi\n")
+            
+            elif op["type"] == Intrinsic.LOAD:
+                wf.write("      ;-- load (,) --\n")
+                wf.write("      pop eax\n")
+                wf.write("      xor ebx, ebx\n")
+                wf.write("      mov bl, [eax]\n")
+                wf.write("      push ebx\n")
 
+            elif op["type"] == Intrinsic.STORE:
+                wf.write("      ;-- store (.) --\n")
+                wf.write("      pop  eax\n")
+                wf.write("      pop  ebx\n")
+                wf.write("      mov  byte ptr [ebx], al\n")
+            
+            elif op["type"] == Intrinsic.PRINT:
+                wf.write("      ;-- print --\n")
+                wf.write("      pop eax\n")
+                wf.write("      invoke StdOut, addr [eax]\n")
         
         with open("static\endAsm.txt","r") as rf:
             text = rf.read()
@@ -279,65 +294,88 @@ def compile_program(program, outFilePath):
 
 def simulate_program(program):
     stack = []
+    mem = bytearray(690_000)
     i = 0
     while i < len(program):
         op = program[i]
 
-        assert len(Intrinsic) == 13, "Exhaustive handling of operations whilst simulating"
-        if op[0] == Intrinsic.PUSH:
-            stack.append(op[1])
+        assert len(Intrinsic) == 16, "Exhaustive handling of operations whilst simulating"
+        if op["type"] == Intrinsic.PUSH:
+            stack.append(op["val"])
 
-        elif op[0] == Intrinsic.ADD:
+        elif op["type"] == Intrinsic.ADD:
             a = stack.pop()
             b = stack.pop()
             stack.append(a+b)
 
-        elif op[0] == Intrinsic.SUB:
+        elif op["type"] == Intrinsic.SUB:
             a = stack.pop()
             b = stack.pop()
             stack.append(b-a)
         
-        elif op[0] == Intrinsic.EQUAL:
+        elif op["type"] == Intrinsic.EQUAL:
             a = stack.pop()
             b = stack.pop()
             stack.append(int(a == b))
-        elif op[0] == Intrinsic.GT:
+        elif op["type"] == Intrinsic.GT:
             b = stack.pop()
             a = stack.pop()
             stack.append(int(a > b))
 
-        elif op[0] == Intrinsic.LT:
+        elif op["type"] == Intrinsic.LT:
             b = stack.pop()
             a = stack.pop()
             stack.append(int(a < b))
-        elif op[0] == Intrinsic.IF:
+
+        elif op["type"] == Intrinsic.IF:
             a = stack[-1]
-            assert len(op) >= 2, "`if` does not have ref to end of its block call crossreference_blocks"
+            if "jmp" not in op:
+                print("%s:%d:%d ERROR: `if` can only be used when an `end` is mentioned" % program[i]["loc"])
+                exit(1)
             if a == 0:
-                i = op[1]
+                i = op["jmp"]
 
-        elif op[0] == Intrinsic.ELSE:
-            assert len(op) >= 2, "`else` does not have ref to end of its block call crossreference_blocks"
-            i = op[1]
+        elif op["type"] == Intrinsic.ELSE:
+            if "jmp" not in op:
+                print("%s:%d:%d ERROR: `else` can only be used when an `end` is mentioned" % program[i]["loc"])
+                exit(1)
 
-        elif op[0] == Intrinsic.DO:
-            assert len(op) >= 2, "`do` does not have ref to end of its block call crossreference_blocks"
+            i = op["jmp"]
+
+        elif op["type"] == Intrinsic.DO:
+            if "jmp" not in op:
+                print("%s:%d:%d ERROR: `do` can only be used when an `end` is mentioned" % program[i]["loc"])
+                exit(1)
+
             a = stack.pop()
             if a == 0:
-                i = op[1]
+                i = op["jmp"]
 
-        elif op[0] == Intrinsic.END:
-            if len(op) >=2:
-                i = op[1]
+        elif op["type"] == Intrinsic.END:
+            if "jmp" in op:
+                i = op["jmp"]
 
-        elif op[0] == Intrinsic.DUP:
+        elif op["type"] == Intrinsic.DUP:
             stack.append(stack[-1])
 
-        elif op[0] == Intrinsic.DUMP:
+        elif op["type"] == Intrinsic.DUMP:
             a = stack.pop()
             print(a)
+        elif op["type"] == Intrinsic.MEM:
+            stack.append(0)
+
+        elif op["type"] == Intrinsic.LOAD:
+            addr = stack.pop()
+            byte = mem[addr]
+            stack.append(byte)
+        
+        elif op["type"] == Intrinsic.STORE:
+            val = stack.pop()
+            addr = stack.pop()
+            mem[addr] = val & 0xFF
 
         i += 1
+        print(mem[:10])
 
 
 def main():

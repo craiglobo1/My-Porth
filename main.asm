@@ -10,53 +10,261 @@
   includelib C:\masm32\lib\masm32.lib
 .data
     decimalstr db 16 DUP (0)  ; address to store dump values
-    whileCondition db 1 DUP (0)  ; address to store dump values
+    aSymb db 97, 0
     negativeSign db "-", 0    ; negativeSign     
     nl DWORD 10               ; new line character in ascii
+.data?
+  mem db ?
 
 .code
 
   start PROC
-     ; -- push --
-      push 10
- ; -- while --
-     WHILE_1:
+      ;-- mem --
+      lea edi, mem
+      push edi
       ; -- duplicate --
       pop eax
       push eax
       push eax
      ; -- push --
-      push 0
-     ; -- greater than --
-      pop ebx
-      pop eax
-      .if eax > ebx
-          push 1
-      .else
-          push 0
-      .endif
- ; -- do --
-      pop eax
-      cmp eax, 1
-      jne END_10
-      ; -- duplicate --
-      pop eax
-      push eax
-      push eax
-      ; -- dump --
-      pop eax
-      lea edi, decimalstr
-      call DUMP
+      push 72
+      ;-- store (.) --
+      pop  eax
+      pop  ebx
+      mov  byte ptr [ebx], al
      ; -- push --
       push 1
+     ; -- add --
+      pop eax
+      pop ebx
+      add eax, ebx
+      push eax
+      ; -- duplicate --
+      pop eax
+      push eax
+      push eax
+     ; -- push --
+      push 101
+      ;-- store (.) --
+      pop  eax
+      pop  ebx
+      mov  byte ptr [ebx], al
+     ; -- push --
+      push 1
+     ; -- add --
+      pop eax
+      pop ebx
+      add eax, ebx
+      push eax
+      ; -- duplicate --
+      pop eax
+      push eax
+      push eax
+     ; -- push --
+      push 108
+      ;-- store (.) --
+      pop  eax
+      pop  ebx
+      mov  byte ptr [ebx], al
+     ; -- push --
+      push 1
+     ; -- add --
+      pop eax
+      pop ebx
+      add eax, ebx
+      push eax
+      ; -- duplicate --
+      pop eax
+      push eax
+      push eax
+     ; -- push --
+      push 108
+      ;-- store (.) --
+      pop  eax
+      pop  ebx
+      mov  byte ptr [ebx], al
+     ; -- push --
+      push 1
+     ; -- add --
+      pop eax
+      pop ebx
+      add eax, ebx
+      push eax
+      ; -- duplicate --
+      pop eax
+      push eax
+      push eax
+     ; -- push --
+      push 111
+      ;-- store (.) --
+      pop  eax
+      pop  ebx
+      mov  byte ptr [ebx], al
+     ; -- push --
+      push 1
+     ; -- add --
+      pop eax
+      pop ebx
+      add eax, ebx
+      push eax
+      ; -- duplicate --
+      pop eax
+      push eax
+      push eax
+     ; -- push --
+      push 44
+      ;-- store (.) --
+      pop  eax
+      pop  ebx
+      mov  byte ptr [ebx], al
+     ; -- push --
+      push 1
+     ; -- add --
+      pop eax
+      pop ebx
+      add eax, ebx
+      push eax
+      ; -- duplicate --
+      pop eax
+      push eax
+      push eax
+     ; -- push --
+      push 32
+      ;-- store (.) --
+      pop  eax
+      pop  ebx
+      mov  byte ptr [ebx], al
+     ; -- push --
+      push 1
+     ; -- add --
+      pop eax
+      pop ebx
+      add eax, ebx
+      push eax
+      ; -- duplicate --
+      pop eax
+      push eax
+      push eax
+     ; -- push --
+      push 87
+      ;-- store (.) --
+      pop  eax
+      pop  ebx
+      mov  byte ptr [ebx], al
+     ; -- push --
+      push 1
+     ; -- add --
+      pop eax
+      pop ebx
+      add eax, ebx
+      push eax
+      ; -- duplicate --
+      pop eax
+      push eax
+      push eax
+     ; -- push --
+      push 111
+      ;-- store (.) --
+      pop  eax
+      pop  ebx
+      mov  byte ptr [ebx], al
+     ; -- push --
+      push 1
+     ; -- add --
+      pop eax
+      pop ebx
+      add eax, ebx
+      push eax
+      ; -- duplicate --
+      pop eax
+      push eax
+      push eax
+     ; -- push --
+      push 114
+      ;-- store (.) --
+      pop  eax
+      pop  ebx
+      mov  byte ptr [ebx], al
+     ; -- push --
+      push 1
+     ; -- add --
+      pop eax
+      pop ebx
+      add eax, ebx
+      push eax
+      ; -- duplicate --
+      pop eax
+      push eax
+      push eax
+     ; -- push --
+      push 108
+      ;-- store (.) --
+      pop  eax
+      pop  ebx
+      mov  byte ptr [ebx], al
+     ; -- push --
+      push 1
+     ; -- add --
+      pop eax
+      pop ebx
+      add eax, ebx
+      push eax
+      ; -- duplicate --
+      pop eax
+      push eax
+      push eax
+     ; -- push --
+      push 100
+      ;-- store (.) --
+      pop  eax
+      pop  ebx
+      mov  byte ptr [ebx], al
+     ; -- push --
+      push 1
+     ; -- add --
+      pop eax
+      pop ebx
+      add eax, ebx
+      push eax
+      ; -- duplicate --
+      pop eax
+      push eax
+      push eax
+     ; -- push --
+      push 10
+      ;-- store (.) --
+      pop  eax
+      pop  ebx
+      mov  byte ptr [ebx], al
+      ; -- duplicate --
+      pop eax
+      push eax
+      push eax
+     ; -- push --
+      push 1
+     ; -- add --
+      pop eax
+      pop ebx
+      add eax, ebx
+      push eax
+      ;-- mem --
+      lea edi, mem
+      push edi
      ; -- sub --
       pop ebx
       pop eax
       sub eax, ebx
       push eax
-      jmp WHILE_1
-      END_10:
- ; -- end while --
+      ; -- dump --
+      pop eax
+      lea edi, decimalstr
+      call DUMP
+      ;-- mem --
+      lea edi, mem
+      push edi
+      ;-- print --
+      pop eax
+      invoke StdOut, addr [eax]
       invoke ExitProcess, 0
   start ENDP
 
