@@ -15,7 +15,6 @@ mem 100 2 - + 1 .
     drop
     mem 100 + dup 10 .
     print
-
     mem     , 1 shl 
     mem 1 + , 
     bor

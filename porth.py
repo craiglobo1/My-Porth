@@ -6,11 +6,21 @@ Op is a dict with the follwing possible fields
 - `value` -- Only exists for Intrinsic.PUSH. Contains the value to be pushed to stack
 - `jmp` -- It is an optional field and is used for code blocks like if,else, while, end etc. It is created in crossreference_blocks
 """
+"""
+Token is a dict with the follwing possible fields
+- `type` -- The type of the Op. One of Token.INT, Token.WORD etc
+- `loc` -- location of the Op in the program it contains (`file_name`,  `row`, `col`)
+- `value` -- the value of the token depending on the type of the Token. For `str` it's Token.WORD and For `int` it's Token.INT
+"""
 
 
 import sys
 from enum import Enum,auto
 import subprocess
+
+class Token(Enum):
+    INT = auto()
+    WORD = auto()
 
 class Intrinsic(Enum):
     # arithmetic operations
@@ -102,83 +112,70 @@ def find_col(line, start, predicate):
         start += 1
     return start
 
+def lex_word(wordOfToken):
+    try:
+        return (Token.INT, int(wordOfToken))
+    except:
+        return (Token.WORD, wordOfToken)
+
+
 def lex_line(line):
     col = find_col(line, 0, lambda x: x.isspace())
     while col < len(line):
         col_end = find_col(line, col, lambda x: not x.isspace())
-        yield (col, line[col:col_end])
+        yield (col, lex_word(line[col:col_end]))
         col = find_col(line, col_end, lambda x: x.isspace())
 
 
 def lex_file(file_path):
     with open(file_path, "r") as f:
-        return [(file_path, row, col, token) 
+        return [{"type": tokenType, "loc": (file_path, row+1, col+1), "value" : tokenVal} 
                 for (row, line) in enumerate(f.readlines())
-                for (col, token) in lex_line(line.split('//')[0])]
+                for (col, (tokenType, tokenVal)) in lex_line(line.split('//')[0])]
 
+
+assert len(Intrinsic) == 26, "Exhaustive handling of op in parseTokenAsOp"
+BUILTIN_WORDS = {
+"+" : Intrinsic.ADD,
+"-" : Intrinsic.SUB,
+"dump" : Intrinsic.DUMP,
+"=" : Intrinsic.EQUAL,
+">" : Intrinsic.GT,
+"<" : Intrinsic.LT,
+"if" : Intrinsic.IF,
+"else" : Intrinsic.ELSE,
+"while" : Intrinsic.WHILE,
+"do" : Intrinsic.DO,
+"end" : Intrinsic.END,
+"drop" : Intrinsic.DROP,
+"dup" : Intrinsic.DUP,
+"2dup" : Intrinsic.DUP2,
+"swap" : Intrinsic.SWAP,
+"over" : Intrinsic.OVER,
+"2over" : Intrinsic.OVER2,
+"mem" : Intrinsic.MEM,
+"." : Intrinsic.STORE,
+"," : Intrinsic.LOAD,
+"print" : Intrinsic.PRINT,
+"shl" : Intrinsic.SHL,
+"shr" : Intrinsic.SHR,
+"bor" : Intrinsic.BOR,
+"band" : Intrinsic.BAND
+}
 def load_program(program_name):
 
     def parseTokenAsOp(token):
-        file_path, row, col, word = token
-        row += 1
-        col += 1
-        assert len(Intrinsic) == 26, "Exhaustive handling of op in parseTokenAsOp"
-        if word == "+":
-            return {"type": Intrinsic.ADD, "loc" : (file_path, row, col)}
-        elif word == "-":
-            return {"type": Intrinsic.SUB, "loc" : (file_path, row, col)}
-        elif word == "dump":
-            return {"type": Intrinsic.DUMP, "loc" : (file_path, row, col)}
-        elif word == "=":
-            return {"type": Intrinsic.EQUAL, "loc" : (file_path, row, col)}
-        elif word == ">":
-            return {"type": Intrinsic.GT, "loc" : (file_path, row, col)}
-        elif word == "<":
-            return {"type": Intrinsic.LT, "loc" : (file_path, row, col)}
-        elif word  == "if":
-            return {"type": Intrinsic.IF, "loc" : (file_path, row, col)}
-        elif word == "else":
-            return {"type": Intrinsic.ELSE, "loc" : (file_path, row, col)}
-        elif word == "while":
-            return {"type": Intrinsic.WHILE, "loc" : (file_path, row, col)}
-        elif word == "do":
-            return {"type": Intrinsic.DO, "loc" : (file_path, row, col)}
-        elif word == "end":
-            return {"type": Intrinsic.END, "loc" : (file_path, row, col)}
-        elif word == "drop":
-            return {"type": Intrinsic.DROP, "loc" : (file_path, row, col)}
-        elif word == "dup":
-            return {"type": Intrinsic.DUP, "loc" : (file_path, row, col)}
-        elif word == "2dup":
-            return {"type": Intrinsic.DUP2, "loc" : (file_path, row, col)}
-        elif word == "swap":
-            return {"type": Intrinsic.SWAP, "loc" : (file_path, row, col)}
-        elif word == "over":
-            return {"type": Intrinsic.OVER, "loc" : (file_path, row, col)}
-        elif word == "2over":
-            return {"type": Intrinsic.OVER2, "loc" : (file_path, row, col)}
-        elif word == "mem":
-            return {"type": Intrinsic.MEM, "loc" : (file_path, row, col)}
-        elif word == ".":
-            return {"type": Intrinsic.STORE, "loc": (file_path, row, col)}
-        elif word == ",":
-            return {"type": Intrinsic.LOAD, "loc": (file_path, row, col)}
-        elif word == "print":
-            return {"type": Intrinsic.PRINT, "loc" : (file_path, row, col)}
-        elif word == "shl":
-            return {"type": Intrinsic.SHL, "loc" : (file_path, row, col)}
-        elif word == "shr":
-            return {"type": Intrinsic.SHR, "loc" : (file_path, row, col)}
-        elif word == "bor":
-            return {"type": Intrinsic.BOR, "loc" : (file_path, row, col)}
-        elif word == "band":
-            return {"type": Intrinsic.BAND, "loc" : (file_path, row, col)}
-        else:
-            try:
-                return {"type": Intrinsic.PUSH, "loc" : (file_path, row, col), "val" : int(word)}
-            except ValueError as err:
-                print(f"{file_path}:{row}:{col} {err}")
+        if token["type"] == Token.WORD:
+            if token["value"] in BUILTIN_WORDS:
+                return {"type" : BUILTIN_WORDS[token["value"]], "loc" : token["loc"]}
+            else:
+                print("%s:%d:%d unknown word: %s" % (token["loc"] + (token["value"],)))
                 exit(1)
+
+        if token["type"] == Token.INT:
+            return {"type" : Intrinsic.PUSH, "loc" : token["loc"], "value" : token["value"]}
+        else:
+            assert False, "unreachable"
 
     return [ parseTokenAsOp(token) for token in lex_file(program_name)]
 
@@ -192,7 +189,7 @@ def compile_program(program, outFilePath):
         for i, op in enumerate(program):
             assert len(Intrinsic) == 26, "Exhaustive handling of operations whilst compiling"
             if op["type"] == Intrinsic.PUSH:
-                valToPush = op["val"]
+                valToPush = op["value"]
                 wf.write(f"     ; -- push {valToPush} --\n")
                 wf.write(f"      push {valToPush}\n")
             
@@ -410,7 +407,7 @@ def simulate_program(program):
 
         assert len(Intrinsic) == 26, "Exhaustive handling of operations whilst simulating"
         if op["type"] == Intrinsic.PUSH:
-            stack.append(op["val"])
+            stack.append(op["value"])
         
         if op["type"] == Intrinsic.DROP:
             stack.pop()
