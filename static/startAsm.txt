@@ -8,14 +8,3 @@
   includelib C:\masm32\lib\kernel32.lib
   includelib C:\masm32\lib\user32.lib
   includelib C:\masm32\lib\masm32.lib
-.data
-    decimalstr db 16 DUP (0)  ; address to store dump values
-    aSymb db 97, 0
-    negativeSign db "-", 0    ; negativeSign     
-    nl DWORD 10               ; new line character in ascii
-.data?
-  mem db ?
-
-.code
-
-  start PROC
