@@ -13,23 +13,38 @@ from enum import Enum,auto
 import subprocess
 
 class Intrinsic(Enum):
-    PUSH = auto()
+    # arithmetic operations
     ADD = auto()
     SUB = auto()
+    # logical operations
     EQUAL = auto()
     GT = auto()
     LT = auto()
-    DUMP = auto()
+    # blocks
     IF = auto()
     ELSE = auto()
     WHILE = auto()
     DO = auto()
     END = auto()
+    # stack operations
+    PUSH = auto()
+    DROP= auto()
+    DUMP = auto()
     DUP = auto()
+    DUP2=auto()
+    OVER= auto()
+    OVER2= auto()
+    SWAP = auto()
+    # mem operations
     MEM = auto()
     STORE = auto()
     LOAD = auto()
     PRINT = auto()
+    # bitwise operations
+    SHL= auto()
+    SHR = auto()
+    BAND = auto()
+    BOR = auto()
 
 def usage(program_name):
     print("Usage: %s [OPTIONS] <SUBCOMMAND> [ARGS]" % program_name)
@@ -46,7 +61,7 @@ def callCmd(cmd):
 def crossreference_blocks(program):
     stack = []
     for i, op in enumerate(program):
-        assert len(Intrinsic) == 17 , "Exhaustive handling of ops in crossreference_blocks (not all ops handled only blocks)" 
+        assert len(Intrinsic) == 26, "Exhaustive handling of ops in crossreference_blocks (not all ops handled only blocks)" 
         if op["type"] == Intrinsic.IF:
             stack.append(i)
         
@@ -107,7 +122,7 @@ def load_program(program_name):
         file_path, row, col, word = token
         row += 1
         col += 1
-        assert len(Intrinsic) == 17, "Exhaustive handling of op in parseTokenAsOp"
+        assert len(Intrinsic) == 26, "Exhaustive handling of op in parseTokenAsOp"
         if word == "+":
             return {"type": Intrinsic.ADD, "loc" : (file_path, row, col)}
         elif word == "-":
@@ -130,8 +145,18 @@ def load_program(program_name):
             return {"type": Intrinsic.DO, "loc" : (file_path, row, col)}
         elif word == "end":
             return {"type": Intrinsic.END, "loc" : (file_path, row, col)}
+        elif word == "drop":
+            return {"type": Intrinsic.DROP, "loc" : (file_path, row, col)}
         elif word == "dup":
             return {"type": Intrinsic.DUP, "loc" : (file_path, row, col)}
+        elif word == "2dup":
+            return {"type": Intrinsic.DUP2, "loc" : (file_path, row, col)}
+        elif word == "swap":
+            return {"type": Intrinsic.SWAP, "loc" : (file_path, row, col)}
+        elif word == "over":
+            return {"type": Intrinsic.OVER, "loc" : (file_path, row, col)}
+        elif word == "2over":
+            return {"type": Intrinsic.OVER2, "loc" : (file_path, row, col)}
         elif word == "mem":
             return {"type": Intrinsic.MEM, "loc" : (file_path, row, col)}
         elif word == ".":
@@ -140,6 +165,14 @@ def load_program(program_name):
             return {"type": Intrinsic.LOAD, "loc": (file_path, row, col)}
         elif word == "print":
             return {"type": Intrinsic.PRINT, "loc" : (file_path, row, col)}
+        elif word == "shl":
+            return {"type": Intrinsic.SHL, "loc" : (file_path, row, col)}
+        elif word == "shr":
+            return {"type": Intrinsic.SHR, "loc" : (file_path, row, col)}
+        elif word == "bor":
+            return {"type": Intrinsic.BOR, "loc" : (file_path, row, col)}
+        elif word == "band":
+            return {"type": Intrinsic.BAND, "loc" : (file_path, row, col)}
         else:
             try:
                 return {"type": Intrinsic.PUSH, "loc" : (file_path, row, col), "val" : int(word)}
@@ -157,11 +190,15 @@ def compile_program(program, outFilePath):
 
         #add implementation of logic
         for i, op in enumerate(program):
-            assert len(Intrinsic) == 17, "Exhaustive handling of operations whilst compiling"
+            assert len(Intrinsic) == 26, "Exhaustive handling of operations whilst compiling"
             if op["type"] == Intrinsic.PUSH:
                 valToPush = op["val"]
-                wf.write(f"     ; -- push --\n")
+                wf.write(f"     ; -- push {valToPush} --\n")
                 wf.write(f"      push {valToPush}\n")
+            
+            if op["type"] == Intrinsic.DROP:
+                wf.write("      ; -- drop --\n")
+                wf.write("      pop eax\n")
 
             elif op["type"] == Intrinsic.ADD:
                 wf.write(f"     ; -- add --\n")
@@ -180,34 +217,39 @@ def compile_program(program, outFilePath):
 
             elif op["type"] == Intrinsic.EQUAL:
                 wf.write(f"     ; -- equal --\n")
-                wf.write("      pop eax\n")
-                wf.write("      pop ebx\n")
-                wf.write("      .if eax == ebx\n")
-                wf.write("          push 1\n")
-                wf.write("      .else\n")
-                wf.write("          push 0\n")
-                wf.write("      .endif\n")
+                wf.write(f"      pop eax\n")
+                wf.write(f"      pop ebx\n")
+                wf.write(f"      cmp eax, ebx\n")
+                wf.write(f"      jne ZERO{i}\n")
+                wf.write(f"      push 1\n")
+                wf.write(f"      jmp END{i}\n")
+                wf.write(f"      ZERO{i}:\n")
+                wf.write(f"          push 0\n")
+                wf.write(f"      END{i}:\n")
             
             elif op["type"] == Intrinsic.GT:
                 wf.write(f"     ; -- greater than --\n")
-                wf.write("      pop ebx\n")
-                wf.write("      pop eax\n")
-                wf.write("      .if eax > ebx\n")
-                wf.write("          push 1\n")
-                wf.write("      .else\n")
-                wf.write("          push 0\n")
-                wf.write("      .endif\n")
+                wf.write(f"      pop eax\n")
+                wf.write(f"      pop ebx\n")
+                wf.write(f"      cmp eax, ebx\n")
+                wf.write(f"      jge ZERO{i}\n")
+                wf.write(f"      push 1\n")
+                wf.write(f"      jmp END{i}\n")
+                wf.write(f"      ZERO{i}:\n")
+                wf.write(f"          push 0\n")
+                wf.write(f"      END{i}:\n")
                         
             elif op["type"] == Intrinsic.LT:
                 wf.write(f"     ; -- less than --\n")
-                wf.write("      pop ebx\n")
-                wf.write("      pop eax\n")
-                wf.write("      .if eax < ebx\n")
-                wf.write("          push 1\n")
-                wf.write("      .else\n")
-                wf.write("          push 0\n")
-                wf.write("      .endif\n")
-
+                wf.write(f"      pop eax\n")
+                wf.write(f"      pop ebx\n")
+                wf.write(f"      cmp eax, ebx\n")
+                wf.write(f"      jle ZERO{i}\n")
+                wf.write(f"      push 1\n")
+                wf.write(f"      jmp END{i}\n")
+                wf.write(f"      ZERO{i}:\n")
+                wf.write(f"          push 0\n")
+                wf.write(f"      END{i}:\n")
 
             elif op["type"] == Intrinsic.DUMP:
                 wf.write(f"      ; -- dump --\n")
@@ -219,17 +261,20 @@ def compile_program(program, outFilePath):
                 if "jmp" not in op:
                     print("%s:%d:%d ERROR: `if` can only be used when an `end` is mentioned" % program[i]["loc"])
                     exit(1)
+                jmpArg = op["jmp"]
                 wf.write(f" ; -- if --\n")
                 wf.write("      pop eax\n")
-                wf.write("      push eax\n")
-                wf.write("      .if eax == 1\n")
+                wf.write("      cmp eax, 1\n")
+                wf.write(f"      jne NEXT{jmpArg}\n")
             
             elif op["type"] == Intrinsic.ELSE:
                 if "jmp" not in op:
                     print("%s:%d:%d ERROR: `else` can only be used when an `end` is mentioned" % program[i]["loc"])
                     exit(1)
+                jmpArg = op["jmp"]
                 wf.write(f" ; -- else --\n")
-                wf.write("      .else\n")
+                wf.write(f"      jmp NEXT{jmpArg}\n")
+                wf.write(f"      NEXT{i}:\n")
             
             elif op["type"] == Intrinsic.WHILE:
                 wf.write(f" ; -- while --\n")
@@ -253,7 +298,7 @@ def compile_program(program, outFilePath):
                     wf.write(f"      END_{i}:\n")
                     wf.write(f" ; -- end while --\n")
                 else:
-                    wf.write("      .endif\n")
+                    wf.write(f"      NEXT{i}:\n")
                     wf.write(f" ; -- end --\n")
 
             elif op["type"] == Intrinsic.DUP:
@@ -261,6 +306,41 @@ def compile_program(program, outFilePath):
                 wf.write("      pop eax\n")
                 wf.write("      push eax\n")
                 wf.write("      push eax\n")
+
+            elif op["type"] == Intrinsic.DUP2:
+                wf.write("      ; -- duplicate --\n")
+                wf.write("      pop  eax\n")
+                wf.write("      pop  ebx\n")
+                wf.write("      push ebx\n")
+                wf.write("      push eax\n")
+                wf.write("      push ebx\n")
+                wf.write("      push eax\n")
+            
+            elif op["type"] == Intrinsic.OVER:
+                wf.write("      ; -- duplicate --\n")
+                wf.write("      pop  eax\n")
+                wf.write("      pop  ebx\n")
+                wf.write("      push ebx\n")
+                wf.write("      push eax\n")
+                wf.write("      push ebx\n")
+
+            elif op["type"] == Intrinsic.OVER2:
+                wf.write("      ; -- duplicate --\n")
+                wf.write("      pop  eax\n")
+                wf.write("      pop  ebx\n")
+                wf.write("      pop  ecx\n")
+                wf.write("      push ecx\n")
+                wf.write("      push ebx\n")
+                wf.write("      push eax\n")
+                wf.write("      push ecx\n")
+
+            elif op["type"] == Intrinsic.SWAP:
+                wf.write("      ; -- duplicate --\n")
+                wf.write("      pop  eax\n")
+                wf.write("      pop  ebx\n")
+                wf.write("      push eax\n")
+                wf.write("      push ebx\n")
+
 
             elif op["type"] == Intrinsic.MEM:
                 wf.write("      ;-- mem --\n")
@@ -284,7 +364,36 @@ def compile_program(program, outFilePath):
                 wf.write("      ;-- print --\n")
                 wf.write("      pop eax\n")
                 wf.write("      invoke StdOut, addr [eax]\n")
-        
+
+            elif op["type"] == Intrinsic.SHL:
+                wf.write("      ;-- shl --\n")
+                wf.write("      pop ecx\n")
+                wf.write("      pop ebx\n")
+                wf.write("      shl ebx, cl\n")
+                wf.write("      push ebx\n")
+                
+
+            elif op["type"] == Intrinsic.SHR:
+                wf.write("      ;-- shr --\n")
+                wf.write("      pop ecx\n")
+                wf.write("      pop ebx\n")
+                wf.write("      shr ebx, cl\n")
+                wf.write("      push ebx\n")
+
+            elif op["type"] == Intrinsic.BOR:
+                wf.write("      ;-- bor --\n")
+                wf.write("      pop eax\n")
+                wf.write("      pop ebx\n")
+                wf.write("      or ebx, eax\n")
+                wf.write("      push  ebx\n")
+
+            elif op["type"] == Intrinsic.BAND:
+                wf.write("      ;-- bor --\n")
+                wf.write("      pop eax\n")
+                wf.write("      pop ebx\n")
+                wf.write("      and ebx, eax\n")
+                wf.write("      push  ebx\n")
+            
         with open("static\endAsm.txt","r") as rf:
             text = rf.read()
         wf.write(text)
@@ -299,9 +408,12 @@ def simulate_program(program):
     while i < len(program):
         op = program[i]
 
-        assert len(Intrinsic) == 16, "Exhaustive handling of operations whilst simulating"
+        assert len(Intrinsic) == 26, "Exhaustive handling of operations whilst simulating"
         if op["type"] == Intrinsic.PUSH:
             stack.append(op["val"])
+        
+        if op["type"] == Intrinsic.DROP:
+            stack.pop()
 
         elif op["type"] == Intrinsic.ADD:
             a = stack.pop()
@@ -328,7 +440,7 @@ def simulate_program(program):
             stack.append(int(a < b))
 
         elif op["type"] == Intrinsic.IF:
-            a = stack[-1]
+            a = stack.pop()
             if "jmp" not in op:
                 print("%s:%d:%d ERROR: `if` can only be used when an `end` is mentioned" % program[i]["loc"])
                 exit(1)
@@ -357,10 +469,42 @@ def simulate_program(program):
 
         elif op["type"] == Intrinsic.DUP:
             stack.append(stack[-1])
+        
+        elif op["type"] == Intrinsic.DUP2:
+            a = stack.pop()
+            b = stack.pop()
+
+            stack.append(b)
+            stack.append(a)
+            stack.append(b)
+            stack.append(a)
+        
+        elif op["type"] == Intrinsic.OVER:
+            a = stack.pop()
+            b = stack.pop()
+            stack.append(b)
+            stack.append(a)
+            stack.append(b)
+
+        elif op["type"] == Intrinsic.OVER2:
+            a = stack.pop()
+            b = stack.pop()
+            c = stack.pop()
+            stack.append(c)
+            stack.append(b)
+            stack.append(a)
+            stack.append(c)
+
+        elif op["type"] == Intrinsic.SWAP:
+            a = stack.pop()
+            b = stack.pop()
+            stack.append(a)
+            stack.append(b)
 
         elif op["type"] == Intrinsic.DUMP:
             a = stack.pop()
             print(a)
+
         elif op["type"] == Intrinsic.MEM:
             stack.append(0)
 
@@ -373,10 +517,36 @@ def simulate_program(program):
             val = stack.pop()
             addr = stack.pop()
             mem[addr] = val & 0xFF
+        
+        elif op["type"] == Intrinsic.PRINT:
+            addr = stack.pop()
+            while mem[addr] != 0:
+                print(chr(mem[addr]), end='')
+                addr += 1
 
+        elif op["type"] == Intrinsic.SHL:
+            shiftAmt = stack.pop()
+            val = stack.pop()
+            stack.append(val << shiftAmt)
+            
+
+        elif op["type"] == Intrinsic.SHR:
+            shiftAmt = stack.pop()
+            val = stack.pop()
+            stack.append(val >> shiftAmt)
+
+        elif op["type"] == Intrinsic.BOR:
+            a= stack.pop()
+            b = stack.pop()
+            stack.append(a | b)
+
+        elif op["type"] == Intrinsic.BAND:
+            a= stack.pop()
+            b = stack.pop()
+            stack.append(a & b)
+        # print(op["type"], stack, mem[:31])
+        # input()
         i += 1
-        print(mem[:10])
-
 
 def main():
 

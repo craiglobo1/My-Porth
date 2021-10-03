@@ -1,0 +1,35 @@
+// mem 1  + 1 .
+mem 100 2 - + 1 .
+
+
+0 while dup 100  2 - < do
+    0 while dup 100 < do
+        dup mem + , if
+            mem 100 + dup 42 .
+        else
+            mem 100 + dup 32 .
+        end
+        print
+        1 +
+    end
+    drop
+    mem 100 + dup 10 .
+    print
+
+    mem     , 1 shl 
+    mem 1 + , 
+    bor
+    1 while dup 100 2 - < do
+        swap 1 shl 7 band
+        over 1 + mem + , bor
+        2dup 110 swap shr 1 band
+        swap mem + swap .
+        swap
+        1 +
+    end
+    drop drop
+
+    1 +
+end
+drop
+

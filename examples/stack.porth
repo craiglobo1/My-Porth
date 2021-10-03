@@ -1,0 +1,25 @@
+21 23 dump dump
+
+111111111 dump
+
+21 23 swap dump dump
+
+111111111 dump
+
+21 23 dup dump dump dump
+
+111111111 dump
+
+21 23 2dup dump dump dump dump
+
+111111111 dump
+
+21 23 over dump dump dump
+
+111111111 dump
+
+21 23 34 2over dump dump dump dump
+
+111111111 dump
+
+21 23 21 drop dump

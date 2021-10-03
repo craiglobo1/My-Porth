@@ -1,18 +1,11 @@
+mem 0 + 97 .
+mem 1 + 98 .
+mem 2 + 99 .
 
-mem dup 72  .
-1 + dup 101 .
-1 + dup 108 .
-1 + dup 108 .
-1 + dup 111 .
-1 + dup 44  .
-1 + dup 32  .
-1 + dup 87  .
-1 + dup 111 .
-1 + dup 114 .
-1 + dup 108 .
-1 + dup 100 .
-1 + dup 10  .
-
-dup 1 + mem - dump
 mem print
-// mem (mem+1) 
+
+mem 0 + dup , 1 + .
+mem 1 + dup , 1 + .
+mem 2    + dup , 1 + .
+
+mem print
