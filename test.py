@@ -75,4 +75,10 @@ def lex_file(file_path):
                 for (row, line) in enumerate(f.readlines())
                 for (col, token) in lex_line(line)]
 
-print(lex_file("./test.porth"))
+def repValWithValues(lst, lst2, val):
+    idx =  lst.index(val)
+    lst.pop(idx)
+    return lst[:idx] + lst2 + lst[idx:]
+
+a = [1,2,3,4]
+print(repValWithValues(a, [1,2,3], 2))

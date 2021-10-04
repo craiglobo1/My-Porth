@@ -13,17 +13,99 @@
     aSymb db 97, 0
     negativeSign db "-", 0    ; negativeSign     
     nl DWORD 10               ; new line character in ascii
-    str_0 db 72, 101, 108, 108, 111, 32, 119, 111, 114, 108, 100, 10, 0 
+    str_0 db 110, 111, 116, 32, 119, 101, 108, 99, 111, 109, 101, 32, 119, 111, 114, 108, 100, 10, 0 
+    str_1 db 104, 101, 108, 108, 111, 32, 119, 111, 114, 108, 100, 10, 0 
 .data?
     mem db ?
 .code
     start PROC
+addr_0:
+     ; -- push int 0 --
+      push 0
+addr_1:
+ ; -- while --
+addr_2:
+      ; -- duplicate --
+      pop eax
+      push eax
+      push eax
+addr_3:
+     ; -- push int 10 --
+      push 10
+addr_4:
+     ; -- less than --
+      pop eax
+      pop ebx
+      cmp eax, ebx
+      jle ZERO4
+      push 1
+      jmp END4
+      ZERO4:
+          push 0
+      END4:
+addr_5:
+ ; -- do --
+      pop eax
+      cmp eax, 1
+      jne addr_19
+addr_6:
+      ; -- duplicate --
+      pop eax
+      push eax
+      push eax
+addr_7:
+     ; -- push int 5 --
+      push 5
+addr_8:
+     ; -- greater than --
+      pop eax
+      pop ebx
+      cmp eax, ebx
+      jge ZERO8
+      push 1
+      jmp END8
+      ZERO8:
+          push 0
+      END8:
+addr_9:
+ ; -- if --
+      pop eax
+      cmp eax, 1
+      jne addr_13
+addr_10:
       lea edi, str_0
       push edi
+addr_11:
       ;-- print --
       pop eax
       invoke StdOut, addr [eax]
-      invoke ExitProcess, 0
+addr_12:
+ ; -- else --
+      jmp addr_15
+addr_13:
+      lea edi, str_1
+      push edi
+addr_14:
+      ;-- print --
+      pop eax
+      invoke StdOut, addr [eax]
+addr_15:
+      ;-- end --
+addr_16:
+     ; -- push int 1 --
+      push 1
+addr_17:
+     ; -- add --
+      pop eax
+      pop ebx
+      add eax, ebx
+      push eax
+addr_18:
+      ;-- endwhile --
+      jmp addr_1
+addr_19:
+     ; -- exit --
+     invoke ExitProcess, 0
   start ENDP
 
   DUMP PROC             ; ARG: EDI pointer to string buffer ; EAX is the number to dump ; ECX,ESI,EBX is used

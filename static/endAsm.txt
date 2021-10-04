@@ -1,4 +1,3 @@
-      invoke ExitProcess, 0
   start ENDP
 
   DUMP PROC             ; ARG: EDI pointer to string buffer ; EAX is the number to dump ; ECX,ESI,EBX is used
