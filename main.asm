@@ -13,84 +13,19 @@
     aSymb db 97, 0
     negativeSign db "-", 0    ; negativeSign     
     nl DWORD 10               ; new line character in ascii
+    str_0 db 72, 101, 108, 108, 111, 32, 119, 111, 114, 108, 100, 10, 0 
 .data?
     mem db ?
 .code
     start PROC
 addr_0:
-     ; -- push int 34 --
-      push 34
+      lea edi, str_0
+      push edi
 addr_1:
-     ; -- push int 35 --
-      push 35
+      ;-- print --
+      pop eax
+      invoke StdOut, addr [eax]
 addr_2:
-     ; -- add --
-      pop eax
-      pop ebx
-      add eax, ebx
-      push eax
-addr_3:
-      ; -- dump --
-      pop eax
-      lea edi, decimalstr
-      call DUMP
-addr_4:
-     ; -- push int 500 --
-      push 500
-addr_5:
-     ; -- push int 80 --
-      push 80
-addr_6:
-     ; -- sub --
-      pop ebx
-      pop eax
-      sub eax, ebx
-      push eax
-addr_7:
-      ; -- dump --
-      pop eax
-      lea edi, decimalstr
-      call DUMP
-addr_8:
-     ; -- push int 10 --
-      push 10
-addr_9:
-     ; -- push int 20 --
-      push 20
-addr_10:
-     ; -- add --
-      pop eax
-      pop ebx
-      add eax, ebx
-      push eax
-addr_11:
-      ; -- dump --
-      pop eax
-      lea edi, decimalstr
-      call DUMP
-addr_12:
-     ; -- push int 10 --
-      push 10
-addr_13:
-     ; -- push int 20 --
-      push 20
-addr_14:
-     ; -- equal --
-      pop eax
-      pop ebx
-      cmp eax, ebx
-      jne ZERO14
-      push 1
-      jmp END14
-      ZERO14:
-          push 0
-      END14:
-addr_15:
-      ; -- dump --
-      pop eax
-      lea edi, decimalstr
-      call DUMP
-addr_16:
      ; -- exit --
      invoke ExitProcess, 0
   start ENDP
