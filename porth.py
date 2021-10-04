@@ -25,9 +25,18 @@ class Token(Enum):
     STR = auto()
     CHAR = auto()
 
+class Keyword(Enum):
+    # blocks
+    IF = auto()
+    ELSE = auto()
+    WHILE = auto()
+    DO = auto()
+    MACRO = auto()
+    INCLUDE = auto()
+    END = auto()
+
 class OP(Enum):
     EXIT = auto()
-    INCLUDE = auto()
     # arithmetic operations
     ADD = auto()
     SUB = auto()
@@ -35,13 +44,6 @@ class OP(Enum):
     EQUAL = auto()
     GT = auto()
     LT = auto()
-    # blocks
-    IF = auto()
-    ELSE = auto()
-    WHILE = auto()
-    DO = auto()
-    MACRO = auto()
-    END = auto()
     # stack operations
     PUSH_INT = auto()
     PUSH_STR = auto()
@@ -118,41 +120,43 @@ def lex_file(file_path):
                 for (col, (token, tokenVal)) in lex_line(file_path, row, line.split('//')[0],)]
 
 
-assert len(OP) == 30, "Exhaustive handling in BUILTIN WORDS"
+assert len(Keyword) == 7, "Exhaustive handling in BUILTIN WORDS"
+KEYWORD_NAMES = {
+"if"    : Keyword.IF,
+"else"  : Keyword.ELSE,
+"while" : Keyword.WHILE,
+"do"    : Keyword.DO,
+"macro" : Keyword.MACRO,
+"include": Keyword.INCLUDE,
+"end"   : Keyword.END,
+}
+
+assert len(OP) == 23, "Exhaustive handling in BUILTIN WORDS"
 BUILTIN_WORDS = {
-"exit": OP.EXIT,
-"include" : OP.INCLUDE,
+"exit"  : OP.EXIT,
+"+"     : OP.ADD,
+"-"     : OP.SUB,
+"dump"  : OP.DUMP,
+"="     : OP.EQUAL,
+">"     : OP.GT,
+"<"     : OP.LT,
 
-"+" : OP.ADD,
-"-" : OP.SUB,
-"dump" : OP.DUMP,
-"=" : OP.EQUAL,
-">" : OP.GT,
-"<" : OP.LT,
+"drop"  : OP.DROP,
+"dup"   : OP.DUP,
+"2dup"  : OP.DUP2,
+"swap"  : OP.SWAP,
+"over"  : OP.OVER,
+"2over"     : OP.OVER2,
 
-"if" : OP.IF,
-"else" : OP.ELSE,
-"while" : OP.WHILE,
-"do" : OP.DO,
-"macro" : OP.MACRO,
-"end" : OP.END,
+"mem"   : OP.MEM,
+"."     : OP.STORE,
+","     : OP.LOAD,
+"print"     : OP.PRINT,
 
-"drop" : OP.DROP,
-"dup" : OP.DUP,
-"2dup" : OP.DUP2,
-"swap" : OP.SWAP,
-"over" : OP.OVER,
-"2over" : OP.OVER2,
-
-"mem" : OP.MEM,
-"." : OP.STORE,
-"," : OP.LOAD,
-"print" : OP.PRINT,
-
-"shl" : OP.SHL,
-"shr" : OP.SHR,
-"bor" : OP.BOR,
-"band" : OP.BAND
+"shl"   : OP.SHL,
+"shr"   : OP.SHR,
+"bor"   : OP.BOR,
+"band"  : OP.BAND
 }
 
 """
@@ -198,27 +202,29 @@ def compile_tokens_to_program(tokens):
         else:
             assert False, 'unreachable'
 
-        assert len(OP) == 30, "Exhaustive ops handling in compile_tokens_to_program. Only ops that form blocks must be handled"
-        if op["type"] == OP.IF:
+        assert len(Keyword) == 7, "Exhaustive ops handling in compile_tokens_to_program. Only ops that form blocks must be handled"
+        if op["type"] == Keyword.IF:
             program.append(op)
             stack.append(ip)
             ip += 1
-        elif op["type"] == OP.ELSE:
+
+        elif op["type"] == Keyword.ELSE:
             program.append(op)
             if_ip = stack.pop()
-            if program[if_ip]["type"] != OP.IF:
+            if program[if_ip]["type"] != Keyword.IF:
                 print('%s:%d:%d: ERROR: `else` can only be used in `if`-blocks' % program[if_ip]["loc"])
                 exit(1)
             program[if_ip]["jmp"] = ip + 1
             stack.append(ip)
             ip += 1
-        elif op["type"] == OP.END:
+
+        elif op["type"] == Keyword.END:
             program.append(op)
             block_ip = stack.pop()
-            if program[block_ip]["type"] == OP.IF or program[block_ip]["type"] == OP.ELSE:
+            if program[block_ip]["type"] == Keyword.IF or program[block_ip]["type"] == Keyword.ELSE:
                 program[block_ip]["jmp"] = ip
                 program[ip]["jmp"] = ip + 1
-            elif program[block_ip]["type"] == OP.DO:
+            elif program[block_ip]["type"] == Keyword.DO:
                 assert program[block_ip]["jmp"] is not None
                 program[ip]["jmp"] = program[block_ip]["jmp"]
                 program[block_ip]["jmp"] = ip + 1
@@ -226,18 +232,20 @@ def compile_tokens_to_program(tokens):
                 print('%s:%d:%d: ERROR: `end` can only close `if`, `else` or `do` blocks for now' % program[block_ip]["loc"])
                 exit(1)
             ip += 1
-        elif op["type"] == OP.WHILE:
+
+        elif op["type"] == Keyword.WHILE:
             program.append(op)
             stack.append(ip)
             ip += 1
-        elif op["type"] == OP.DO:
+
+        elif op["type"] == Keyword.DO:
             program.append(op)
             while_ip = stack.pop()
             program[ip]["jmp"] = while_ip
             stack.append(ip)
             ip += 1
 
-        elif op["type"] == OP.INCLUDE:
+        elif op["type"] == Keyword.INCLUDE:
             if len(rtokens) == 0:
                 print("%s:%d:%d: ERROR: expected include path but found nothing" % op["loc"])
                 exit(1)
@@ -253,7 +261,7 @@ def compile_tokens_to_program(tokens):
                 exit()
             
         # TODO: capability to define macros from command line
-        elif op["type"] == OP.MACRO:
+        elif op["type"] == Keyword.MACRO:
             if len(rtokens) == 0:
                 print("%s:%d:%d: ERROR: expected macro name but found nothing" % op["loc"])
                 exit(1)
@@ -272,6 +280,7 @@ def compile_tokens_to_program(tokens):
 
             macro = {"loc" : op["loc"], "tokens" : []}
             macros[token["value"]] = macro
+
             # TODO: support for nested blocks within the macro definition
             while len(rtokens) > 0:
                 token = rtokens.pop()
@@ -279,6 +288,7 @@ def compile_tokens_to_program(tokens):
                     break
                 else:
                     macro["tokens"].append(token)
+                
             if token["type"] != Token.WORD or token["value"] != "end":
                 print("%s:%d:%d: ERROR: expected `end` at the end of the macro definition but got `%s`" % (token["loc"] + (token["value"], )))
                 exit(1)
@@ -307,7 +317,7 @@ def compile_program(program, outFilePath):
         #add implementation of logic
         for i, op in enumerate(program):
             lt.append(f"addr_{i}:\n")
-            assert len(OP) == 30, "Exhaustive handling of operations whilst compiling"
+            assert len(OP) == 23, "Exhaustive handling of operations whilst compiling"
             if op["type"] == OP.EXIT:
                 lt.append("     ; -- exit --\n")
                 lt.append("     invoke ExitProcess, 0\n")
@@ -385,7 +395,7 @@ def compile_program(program, outFilePath):
                 lt.append("      lea edi, decimalstr\n")
                 lt.append("      call DUMP\n")
             
-            if op["type"] == OP.IF:
+            if op["type"] == Keyword.IF:
                 if "jmp" not in op:
                     print("%s:%d:%d ERROR: `if` can only be used when an `end` is mentioned" % program[i]["loc"])
                     exit(1)
@@ -395,7 +405,7 @@ def compile_program(program, outFilePath):
                 lt.append("      cmp eax, 1\n")
                 lt.append(f"      jne addr_{jmpArg}\n")
             
-            if op["type"] == OP.ELSE:
+            if op["type"] == Keyword.ELSE:
                 if "jmp" not in op:
                     print("%s:%d:%d ERROR: `else` can only be used when an `end` is mentioned" % program[i]["loc"])
                     exit(1)
@@ -403,10 +413,10 @@ def compile_program(program, outFilePath):
                 lt.append(f" ; -- else --\n")
                 lt.append(f"      jmp addr_{jmpArg}\n")
             
-            if op["type"] == OP.WHILE:
+            if op["type"] == Keyword.WHILE:
                 lt.append(f" ; -- while --\n")
 
-            if op["type"] == OP.DO:
+            if op["type"] == Keyword.DO:
                 if "jmp" not in op:
                     print("%s:%d:%d ERROR: `do` can only be used when an `end` is mentioned" % program[i]["loc"])
                     exit(1)
@@ -415,19 +425,13 @@ def compile_program(program, outFilePath):
                 lt.append( "      pop eax\n")
                 lt.append( "      cmp eax, 1\n")
                 lt.append(f"      jne addr_{jmp_idx}\n")
-        
-            if op["type"] == OP.MACRO:
-                assert False, "macro should not exist as its removed whilst compiling to ops"
-            
-            if op["type"] == OP.INCLUDE:
-                assert False, "include should not exist as its removed whilst compiling to ops"
                 
-            if op["type"] == OP.END:
+            if op["type"] == Keyword.END:
                 jmp_idx = op["jmp"]
-                if program[jmp_idx]["type"] == OP.WHILE:
+                if program[jmp_idx]["type"] == Keyword.WHILE:
                     lt.append(f"      ;-- endwhile --\n")
                     lt.append(f"      jmp addr_{jmp_idx}\n")
-                elif program[jmp_idx]["type"] == OP.IF:
+                elif program[jmp_idx]["type"] == Keyword.IF:
                     lt.append(f"      ;-- endif --\n")
                 else:
                     lt.append(f"      ;-- end --\n")
