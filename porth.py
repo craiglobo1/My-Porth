@@ -18,6 +18,7 @@ Token is a dict with the follwing possible fields
 import sys
 from enum import Enum,auto
 import subprocess
+from os import path, getcwd
 
 class Token(Enum):
     INT = auto()
@@ -72,24 +73,13 @@ class OP(Enum):
     BAND = auto()
     BOR = auto()
 
-def usage(program_token):
-    print("Usage: %s [OPTIONS] <SUBCOMMAND> [ARGS]" % program_token)
-    print("SUBCOMMAND:")
-    print("   sim <file>  Simulate the program")
-    print("   com <file>  Compile the program")
-
-def callCmd(cmd):
-    cmdStr = " ".join(cmd)
-    print(f"[CMD] {cmdStr}")
-    subprocess.call(cmd)
-
-
 def find_col(line, start, predicate):
     while start < len(line) and predicate(line[start]):
         start += 1
     return start
 
 def lex_line(file_path, row, line):
+    print(line)
     col = find_col(line, 0, lambda x: x.isspace())
     assert len(Token) == 5, "Exahuastive handling of tokens in lex_line"
     while col < len(line):
@@ -578,7 +568,6 @@ def compile_program(program, outFilePath):
         wf.write(text)
 
 
-    # assert False, "compiler not implemented"
 MEM_CAPACITY = 690_000
 STR_CAPACITY = 690_000
 def simulate_program(program):
@@ -769,29 +758,106 @@ def simulate_program(program):
             i += 1
         # print(op["type"], stack, mem[:31])
         # input()
-def main():
 
+def usage(program_token):
+    print("Usage: %s [OPTIONS] <SUBCOMMAND> [ARGS]" % program_token)
+    print("OPTIONS:")
+    print("   -I <path>             Add the path to the include search list")
+    print("SUBCOMMAND:")
+    print("   sim <file>  Simulate the program")
+    print("   com <file>  Compile the program")
+    print(    "OPTIONS:")
+    print("        -r                  Run the program after successful compilation")
+    print("        -o <file|dir>       Customize the output path")
+
+def callCmd(cmd):
+    cmdStr = " ".join(cmd)
+    print(f"[CMD] {cmdStr}")
+    subprocess.call(cmd)
+
+
+def main():
+    argv = sys.argv
+    compilerPath, *argv = argv
     if len(sys.argv) < 2:
         usage(sys.argv[0])
-        exit()
-    if sys.argv[1] == "com" and len(sys.argv) < 3:
-        usage(sys.argv[0])
+        print("\n[ERROR] No subcommand Given")
         exit()
 
-    program = load_program(sys.argv[2])
-    programtoken = "main"
+    includePaths = [".", "./std/"]
 
-    if sys.argv[1] == "sim":
-        simulate_program(program)
+    while len(argv) > 0:
+        if argv[0] == "-I":
+            argv = argv[1:]
+            if len(argv) == 0:
+                usage(compilerPath)
+                print("[ERROR] no path is provided for `-I` flag", file=sys.stderr)
+                exit(1)
+            includePath, *argv = argv
+            includePaths.append(includePath)
+        else:
+            break
     
-    if sys.argv[1] == "com":
-        print(f"[INFO] Generating {programtoken}.asm")
-        compile_program(program,f"{programtoken}.asm")
-        callCmd(["ml", "/c", "/Zd", "/coff", f"{programtoken}.asm"])
-        callCmd(["Link", "/SUBSYSTEM:CONSOLE", f"{programtoken}.obj"])
-        callCmd([f"{programtoken}.exe"])
-        
+    if len(argv) < 1:
+        usage(compilerPath)
+        print("[ERROR] no subcommand is provided", file=sys.stderr)
+        exit(1)
+    subcommand, *argv = argv 
 
+    programPath = None
+
+    if subcommand == "sim":
+        if len(argv) < 1:
+            usage(compilerPath)
+            print("[ERROR] no input file is provided for the simulation", file=sys.stderr)
+            exit(1)
+        programPath, *argv = argv
+        program = load_program(programPath, includePaths);
+        simulate_program(program, [programPath] + argv)
+    
+    elif subcommand == "com":
+        run = False
+        outputPath = None
+        while len(argv) > 0:
+            arg, *argv = argv
+            if arg == "-r":
+                run = True
+            elif arg == "-o":
+                if len(argv) == 0:
+                    usage(compilerPath)
+                    print("[ERROR] no argument is provided for parameter -o", file=sys.stderr)
+                    exit(1)
+                outputPath, *argv = argv
+            else:
+                programPath = arg
+                break
+        if programPath == None:
+            usage(compilerPath)
+            print("[ERROR] no input file is provided for the compilation", file=sys.stderr)
+            exit(1)
+        
+        if outputPath == None:
+            baseDir = getcwd()
+            programFile = path.basename(programPath)
+            programName = programFile.replace(".porth","")
+            basePath = path.join(baseDir,programName)
+        else:
+            baseDir = outputPath
+            if path.isdir(baseDir):
+                programFile = path.basename(programPath)
+                programName = programFile.replace(".porth","")
+                basePath = path.join(baseDir,programName)
+            else:
+                usage(compilerPath)
+                print("[ERROR] Invalid Path entered")
+        program = load_program(programPath)
+        print(f"[INFO] Generating {basePath}.asm")
+        compile_program(program,f"{basePath}.asm")
+        callCmd(["ml","/Fo" ,f"{basePath}.obj", "/c", "/Zd", "/coff", f"{basePath}.asm"])
+        callCmd(["Link",f"/OUT:{basePath}.exe", "/SUBSYSTEM:CONSOLE", f"{basePath}.obj"])
+        if run:
+            callCmd([f"{basePath}.exe"])
+    
 
 if __name__ == "__main__":
     main()
