@@ -6,9 +6,9 @@ mem BOARD_SIZE 2 - + 1 .
 0 while dup BOARD_SIZE  2 - < do
     0 while dup BOARD_SIZE < do
         dup mem + , if
-            mem BOARD_SIZE + dup 42 .
+            mem BOARD_SIZE + dup '*' .
         else
-            mem BOARD_SIZE + dup 32 .
+            mem BOARD_SIZE + dup ' ' .
         end
         print
         1 +

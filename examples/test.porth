@@ -1,0 +1,3 @@
+include "examples/macro.porth"
+
+writeH

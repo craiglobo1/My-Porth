@@ -1,11 +1,2 @@
 macro writeH "hello world\n" print end
 macro writeN "not welcome world\n" print end
-
-0 while dup 10 < do
-    dup 5 > if
-        writeH
-    else
-        writeN
-    end
-    1 +
-end
