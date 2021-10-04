@@ -24,10 +24,20 @@ class Token(Enum):
     WORD = auto()
     STR = auto()
     CHAR = auto()
+    KEYWORD = auto()
+
+class Keyword(Enum):
+    # blocks
+    IF = auto()
+    ELSE = auto()
+    WHILE = auto()
+    DO = auto()
+    MACRO = auto()
+    INCLUDE = auto()
+    END = auto()
 
 class OP(Enum):
     EXIT = auto()
-    INCLUDE = auto()
     # arithmetic operations
     ADD = auto()
     SUB = auto()
@@ -40,7 +50,6 @@ class OP(Enum):
     ELSE = auto()
     WHILE = auto()
     DO = auto()
-    MACRO = auto()
     END = auto()
     # stack operations
     PUSH_INT = auto()
@@ -82,6 +91,7 @@ def find_col(line, start, predicate):
 
 def lex_line(file_path, row, line):
     col = find_col(line, 0, lambda x: x.isspace())
+    assert len(Token) == 5, "Exahuastive handling of tokens in lex_line"
     while col < len(line):
         loc = (file_path, row + 1, col + 1)
 
@@ -107,7 +117,10 @@ def lex_line(file_path, row, line):
             try:
                 yield (col,(Token.INT, int(wordOfToken)))
             except:
-                yield (col,(Token.WORD, wordOfToken))
+                if wordOfToken in KEYWORD_NAMES:
+                    yield (col, (Token.KEYWORD, KEYWORD_NAMES[wordOfToken]))
+                else:
+                    yield (col,(Token.WORD, wordOfToken))
             col = find_col(line, col_end, lambda x: x.isspace())
 
 
@@ -118,41 +131,40 @@ def lex_file(file_path):
                 for (col, (token, tokenVal)) in lex_line(file_path, row, line.split('//')[0],)]
 
 
-assert len(OP) == 30, "Exhaustive handling in BUILTIN WORDS"
+assert len(Keyword) == 7, "Exhaustive handling in KEYWORD NAMES"
+KEYWORD_NAMES = {
+"if"    : Keyword.IF,
+"else"  : Keyword.ELSE,
+"while" : Keyword.WHILE,
+"do"    : Keyword.DO,
+"macro" : Keyword.MACRO,
+"include": Keyword.INCLUDE,
+"end"   : Keyword.END,
+}
+
+assert len(OP) == 28, "Exhaustive handling in BUILTIN WORDS"
 BUILTIN_WORDS = {
-"exit": OP.EXIT,
-"include" : OP.INCLUDE,
-
-"+" : OP.ADD,
-"-" : OP.SUB,
-"dump" : OP.DUMP,
-"=" : OP.EQUAL,
-">" : OP.GT,
-"<" : OP.LT,
-
-"if" : OP.IF,
-"else" : OP.ELSE,
-"while" : OP.WHILE,
-"do" : OP.DO,
-"macro" : OP.MACRO,
-"end" : OP.END,
-
-"drop" : OP.DROP,
-"dup" : OP.DUP,
-"2dup" : OP.DUP2,
-"swap" : OP.SWAP,
-"over" : OP.OVER,
-"2over" : OP.OVER2,
-
-"mem" : OP.MEM,
-"." : OP.STORE,
-"," : OP.LOAD,
-"print" : OP.PRINT,
-
-"shl" : OP.SHL,
-"shr" : OP.SHR,
-"bor" : OP.BOR,
-"band" : OP.BAND
+"exit"  : OP.EXIT,
+"+"     : OP.ADD,
+"-"     : OP.SUB,
+"dump"  : OP.DUMP,
+"="     : OP.EQUAL,
+">"     : OP.GT,
+"<"     : OP.LT,
+"drop"  : OP.DROP,
+"dup"   : OP.DUP,
+"2dup"  : OP.DUP2,
+"swap"  : OP.SWAP,
+"over"  : OP.OVER,
+"2over"     : OP.OVER2,
+"mem"   : OP.MEM,
+"."     : OP.STORE,
+","     : OP.LOAD,
+"print"     : OP.PRINT,
+"shl"   : OP.SHL,
+"shr"   : OP.SHR,
+"bor"   : OP.BOR,
+"band"  : OP.BAND
 }
 
 """
@@ -160,6 +172,7 @@ Macro is a Dictionary
 "macrotoken" -> (loc, tokens)
 """
 def compile_tokens_to_program(tokens):
+    # print(tokens)
     human = lambda x: str(x).split(".")[-1].lower()
     stack = []
     program = []
@@ -170,126 +183,153 @@ def compile_tokens_to_program(tokens):
         # TODO: some sort of safety mechanism for recursive macros
         token = rtokens.pop()
         op = {}
-        assert len(Token) == 4, "Exhaustive token handling in compile_tokens_to_program"
+        assert len(Token) == 5, "Exhaustive token handling in compile_tokens_to_program"
         if token["type"] == Token.WORD:
             assert isinstance(token["value"], str), "This could be a bug in the lexer"
             if token["value"] in BUILTIN_WORDS:
                 op["type"]= BUILTIN_WORDS[token["value"]]
                 op["loc"] = token["loc"]
+                program.append(op)
+                ip += 1
             elif token["value"] in macros:
                 rtokens += reversed(macros[token["value"]]["tokens"])
                 continue
             else:
                 print("%s:%d:%d: unknown word `%s`" % (token["loc"] + (token["value"], )))
                 exit(1)
+
         elif token["type"] == Token.INT:
             op["type"]= OP.PUSH_INT
             op["value"] = token["value"]
             op["loc"] = token["loc"]
+            program.append(op)
+            ip += 1
+
         elif token["type"] == Token.STR:
             op["type"]= OP.PUSH_STR
             op["value"] = token["value"]
             op["loc"] = token["loc"]
+            program.append(op)
+            ip += 1
+
         elif token["type"] == Token.CHAR:
             op["type"]= OP.PUSH_INT
             op["value"] = ord(token["value"])
             op["loc"] = token["loc"]
+            program.append(op)
+            ip += 1
 
+        elif token["type"] == Token.KEYWORD:
+            assert len(Keyword) == 7, "Exhaustive ops handling in compile_tokens_to_program. Only ops that form blocks must be handled"
+            if token["value"] == Keyword.IF:
+                op["type"] = OP.IF
+                op["loc"] = token["loc"]
+                program.append(op)
+                stack.append(ip)
+                ip += 1
+
+            elif token["value"] == Keyword.ELSE:
+                op["type"] = OP.ELSE
+                op["loc"] = token["loc"]
+                program.append(op)
+                if_ip = stack.pop()
+                if program[if_ip]["type"] != OP.IF:
+                    print('%s:%d:%d: ERROR: `else` can only be used in `if`-blocks' % program[if_ip]["loc"])
+                    exit(1)
+                program[if_ip]["jmp"] = ip + 1
+                stack.append(ip)
+                ip += 1
+
+            elif token["value"] == Keyword.END:
+                op["type"] = OP.END
+                op["loc"] = token["loc"]
+                program.append(op)
+                block_ip = stack.pop()
+                if program[block_ip]["type"] == OP.IF or program[block_ip]["type"] == OP.ELSE:
+                    program[block_ip]["jmp"] = ip
+                    program[ip]["jmp"] = ip + 1
+                elif program[block_ip]["type"] == OP.DO:
+                    assert program[block_ip]["jmp"] is not None
+                    program[ip]["jmp"] = program[block_ip]["jmp"]
+                    program[block_ip]["jmp"] = ip + 1
+                else:
+                    print('%s:%d:%d: ERROR: `end` can only close `if`, `else` or `do` blocks for now' % program[block_ip]["loc"])
+                    exit(1)
+                ip += 1
+
+            elif token["value"] == Keyword.WHILE:
+                op["type"] = OP.WHILE
+                op["loc"] = token["loc"]
+                program.append(op)
+                stack.append(ip)
+                ip += 1
+
+            elif token["value"] == Keyword.DO:
+                op["type"] = OP.DO
+                op["loc"] = token["loc"]
+                program.append(op)
+                while_ip = stack.pop()
+                program[ip]["jmp"] = while_ip
+                stack.append(ip)
+                ip += 1
+
+            elif token["value"] == Keyword.INCLUDE:
+                if len(rtokens) == 0:
+                    print("%s:%d:%d: ERROR: expected include path but found nothing" % op["loc"])
+                    exit(1)
+                token = rtokens.pop()
+                if token["type"] != Token.STR:
+                    print("%s:%d:%d: ERROR: expected include path to be %s but found %s" % (token["loc"] + (human(Token.STR), human(token["type"]))))
+                    exit(1)
+
+                try:
+                    rtokens += reversed(lex_file(token["value"]))
+                except FileNotFoundError:
+                    print("%s:%d:%d: ERROR: `%s` file not found" % (token["loc"] + (token["value"],)))
+                    exit()
+                
+            # TODO: capability to define macros from command line
+            elif token["value"] == Keyword.MACRO:
+                if len(rtokens) == 0:
+                    print("%s:%d:%d: ERROR: expected macro name but found nothing" % op["loc"])
+                    exit(1)
+                token = rtokens.pop()
+                if token["type"] != Token.WORD:
+                    print("%s:%d:%d: ERROR: expected macro name to be %s but found %s" % (token["loc"] + (human(Token.WORD), human(token["type"]))))
+                    exit(1)
+                assert isinstance(token["value"], str), "This is probably a bug in the lexer"
+                if token["value"] in macros:
+                    print("%s:%d:%d: ERROR: redefinition of already existing macro `%s`" % (token["loc"] + (token["value"], )))
+                    print("%s:%d:%d: NOTE: the first definition is located here" % macros[token["value"]]["loc"])
+                    exit(1)
+                if token["value"] in BUILTIN_WORDS:
+                    print("%s:%d:%d: ERROR: redefinition of a builtin word `%s`" % (token["loc"] + (token["value"], )))
+                    exit(1)
+
+                macro = {"loc" : token["loc"], "tokens" : []}
+                macros[token["value"]] = macro
+
+                # TODO: support for nested blocks within the macro definition
+                while len(rtokens) > 0:
+                    token = rtokens.pop()
+                    if token["type"] == Token.KEYWORD and token["value"] == Keyword.END:
+                        break
+                    else:
+                        macro["tokens"].append(token)
+                    
+                if token["type"] != Token.KEYWORD or token["value"] != Keyword.END:
+                    print("%s:%d:%d: ERROR: expected `end` at the end of the macro definition but got `%s`" % (token["loc"] + (token["value"], )))
+                    exit(1)
+            else:
+                print(token)
+                assert False, 'unreachable'
         else:
             assert False, 'unreachable'
 
-        assert len(OP) == 30, "Exhaustive ops handling in compile_tokens_to_program. Only ops that form blocks must be handled"
-        if op["type"] == OP.IF:
-            program.append(op)
-            stack.append(ip)
-            ip += 1
-        elif op["type"] == OP.ELSE:
-            program.append(op)
-            if_ip = stack.pop()
-            if program[if_ip]["type"] != OP.IF:
-                print('%s:%d:%d: ERROR: `else` can only be used in `if`-blocks' % program[if_ip]["loc"])
-                exit(1)
-            program[if_ip]["jmp"] = ip + 1
-            stack.append(ip)
-            ip += 1
-        elif op["type"] == OP.END:
-            program.append(op)
-            block_ip = stack.pop()
-            if program[block_ip]["type"] == OP.IF or program[block_ip]["type"] == OP.ELSE:
-                program[block_ip]["jmp"] = ip
-                program[ip]["jmp"] = ip + 1
-            elif program[block_ip]["type"] == OP.DO:
-                assert program[block_ip]["jmp"] is not None
-                program[ip]["jmp"] = program[block_ip]["jmp"]
-                program[block_ip]["jmp"] = ip + 1
-            else:
-                print('%s:%d:%d: ERROR: `end` can only close `if`, `else` or `do` blocks for now' % program[block_ip]["loc"])
-                exit(1)
-            ip += 1
-        elif op["type"] == OP.WHILE:
-            program.append(op)
-            stack.append(ip)
-            ip += 1
-        elif op["type"] == OP.DO:
-            program.append(op)
-            while_ip = stack.pop()
-            program[ip]["jmp"] = while_ip
-            stack.append(ip)
-            ip += 1
-
-        elif op["type"] == OP.INCLUDE:
-            if len(rtokens) == 0:
-                print("%s:%d:%d: ERROR: expected include path but found nothing" % op["loc"])
-                exit(1)
-            token = rtokens.pop()
-            if token["type"] != Token.STR:
-                print("%s:%d:%d: ERROR: expected include path to be %s but found %s" % (token["loc"] + (human(Token.STR), human(token["type"]))))
-                exit(1)
-
-            try:
-                rtokens += reversed(lex_file(token["value"]))
-            except FileNotFoundError:
-                print("%s:%d:%d: ERROR: `%s` file not found" % (token["loc"] + (token["value"],)))
-                exit()
-            
-        # TODO: capability to define macros from command line
-        elif op["type"] == OP.MACRO:
-            if len(rtokens) == 0:
-                print("%s:%d:%d: ERROR: expected macro name but found nothing" % op["loc"])
-                exit(1)
-            token = rtokens.pop()
-            if token["type"] != Token.WORD:
-                print("%s:%d:%d: ERROR: expected macro name to be %s but found %s" % (token["loc"] + (human(Token.WORD), human(token["type"]))))
-                exit(1)
-            assert isinstance(token["value"], str), "This is probably a bug in the lexer"
-            if token["value"] in macros:
-                print("%s:%d:%d: ERROR: redefinition of already existing macro `%s`" % (token["loc"] + (token["value"], )))
-                print("%s:%d:%d: NOTE: the first definition is located here" % macros[token["value"]]["loc"])
-                exit(1)
-            if token["value"] in BUILTIN_WORDS:
-                print("%s:%d:%d: ERROR: redefinition of a builtin word `%s`" % (token["loc"] + (token["value"], )))
-                exit(1)
-
-            macro = {"loc" : op["loc"], "tokens" : []}
-            macros[token["value"]] = macro
-            # TODO: support for nested blocks within the macro definition
-            while len(rtokens) > 0:
-                token = rtokens.pop()
-                if token["type"] == Token.WORD and token["value"] == "end":
-                    break
-                else:
-                    macro["tokens"].append(token)
-            if token["type"] != Token.WORD or token["value"] != "end":
-                print("%s:%d:%d: ERROR: expected `end` at the end of the macro definition but got `%s`" % (token["loc"] + (token["value"], )))
-                exit(1)
-        else:
-            program.append(op)
-            ip += 1
     if len(stack) > 0:
         print('%s:%d:%d: ERROR: unclosed block' % program[stack.pop()]["loc"])
         exit(1)
     program.append({"type": OP.EXIT})
-
     return program
 
 def load_program(program_token):
@@ -307,7 +347,7 @@ def compile_program(program, outFilePath):
         #add implementation of logic
         for i, op in enumerate(program):
             lt.append(f"addr_{i}:\n")
-            assert len(OP) == 30, "Exhaustive handling of operations whilst compiling"
+            assert len(OP) == 28, "Exhaustive handling of operations whilst compiling"
             if op["type"] == OP.EXIT:
                 lt.append("     ; -- exit --\n")
                 lt.append("     invoke ExitProcess, 0\n")
@@ -415,12 +455,6 @@ def compile_program(program, outFilePath):
                 lt.append( "      pop eax\n")
                 lt.append( "      cmp eax, 1\n")
                 lt.append(f"      jne addr_{jmp_idx}\n")
-        
-            if op["type"] == OP.MACRO:
-                assert False, "macro should not exist as its removed whilst compiling to ops"
-            
-            if op["type"] == OP.INCLUDE:
-                assert False, "include should not exist as its removed whilst compiling to ops"
                 
             if op["type"] == OP.END:
                 jmp_idx = op["jmp"]
@@ -555,7 +589,7 @@ def simulate_program(program):
     while i < len(program):
         op = program[i]
 
-        assert len(OP) == 29, "Exhaustive handling of operations whilst simulating"
+        assert len(OP) == 28, "Exhaustive handling of operations whilst simulating"
         if op["type"] == OP.EXIT:
             exit()
         if op["type"] == OP.PUSH_INT:
@@ -607,7 +641,7 @@ def simulate_program(program):
             stack.append(int(a < b))
             i += 1
 
-        elif op["type"] == OP.IF:
+        elif op["type"] == Keyword.IF:
             a = stack.pop()
             if "jmp" not in op:
                 print("%s:%d:%d ERROR: `if` can only be used when an `end` is mentioned" % program[i]["loc"])
@@ -617,16 +651,16 @@ def simulate_program(program):
             else:
                 i += 1
 
-        elif op["type"] == OP.ELSE:
+        elif op["type"] == Keyword.ELSE:
             if "jmp" not in op:
                 print("%s:%d:%d ERROR: `else` can only be used when an `end` is mentioned" % program[i]["loc"])
                 exit(1)
             i = op["jmp"]
         
-        elif op["type"] == OP.WHILE:
+        elif op["type"] == Keyword.WHILE:
             i += 1
 
-        elif op["type"] == OP.DO:
+        elif op["type"] == Keyword.DO:
             if "jmp" not in op:
                 print("%s:%d:%d ERROR: `do` can only be used when an `end` is mentioned" % program[i]["loc"])
                 exit(1)
@@ -636,14 +670,8 @@ def simulate_program(program):
                 i = op["jmp"]
             else:
                 i += 1
-        
-        elif op["type"] == OP.MACRO:
-            assert False, "macro should not exist as its removed whilst compiling to ops"
-        
-        elif op["type"] == OP.INCLUDE:
-            assert False, "include should not exist as its removed whilst compiling to ops"
 
-        elif op["type"] == OP.END:
+        elif op["type"] == Keyword.END:
             i = op["jmp"]
 
         elif op["type"] == OP.DUP:
