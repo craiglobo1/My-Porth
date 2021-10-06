@@ -2,6 +2,8 @@ import sys
 from enum import Enum,auto
 import subprocess
 from os import path, getcwd
+from collections import deque
+import time
 
 class Token(Enum):
     INT = auto()
@@ -21,14 +23,20 @@ class Keyword(Enum):
     END = auto()
 
 class Intrinsic(Enum):
+    # os operations
+    PRINT = auto()
     EXIT = auto()
     # arithmetic operations
     ADD = auto()
     SUB = auto()
+    DIVMOD = auto()
+    MUL = auto()
     # logical operations
     EQUAL = auto()
+    NE = auto()
     GT = auto()
     LT = auto()
+    # stack operations
     DROP= auto()
     DUMP = auto()
     DUP = auto()
@@ -40,7 +48,8 @@ class Intrinsic(Enum):
     MEM = auto()
     STORE = auto()
     LOAD = auto()
-    PRINT = auto()
+    STORE32 = auto()
+    LOAD32 = auto()
     # bitwise operations
     SHL= auto()
     SHR = auto()
@@ -78,7 +87,7 @@ def lex_line(file_path, row, line):
             yield (col, (Token.STR, bytes(wordOfToken, "utf-8").decode("unicode-escape")))
             col = find_col(line, col_end+1, lambda x: x.isspace())
 
-        if line[col] == "'":
+        elif line[col] == "'":
             col_end = find_col(line, col+1, lambda x: not x == "'")
             if col_end >= len(line) or line[col_end] != "'":
                 print("%s:%d:%d error: string literal not closed" % loc )
@@ -123,13 +132,16 @@ KEYWORD_NAMES = {
 "end"   : Keyword.END,
 }
 
-assert len(Intrinsic) == 21, f"Exhaustive handling in INTRINSIC_WORDS {len(Intrinsic)}"
+assert len(Intrinsic) == 26 , f"Exhaustive handling in INTRINSIC_WORDS {len(Intrinsic)}"
 INTRINSIC_WORDS = {
 "exit"  : Intrinsic.EXIT,
 "+"     : Intrinsic.ADD,
 "-"     : Intrinsic.SUB,
+"divmod": Intrinsic.DIVMOD,
+"*"     : Intrinsic.MUL,
 "dump"  : Intrinsic.DUMP,
 "="     : Intrinsic.EQUAL,
+"!="    : Intrinsic.NE,
 ">"     : Intrinsic.GT,
 "<"     : Intrinsic.LT,
 "drop"  : Intrinsic.DROP,
@@ -141,6 +153,8 @@ INTRINSIC_WORDS = {
 "mem"   : Intrinsic.MEM,
 "."     : Intrinsic.STORE,
 ","     : Intrinsic.LOAD,
+"store32":Intrinsic.STORE32,
+"load32": Intrinsic.LOAD32,
 "print" : Intrinsic.PRINT,
 "shl"   : Intrinsic.SHL,
 "shr"   : Intrinsic.SHR,
@@ -152,7 +166,7 @@ INTRINSIC_WORDS = {
 Macro is a Dictionary
 "macrotoken" -> (loc, tokens)
 """
-def compile_tokens_to_program(tokens):
+def compile_tokens_to_program(tokens,includePaths=[]):
     human = lambda x: str(x).split(".")[-1].lower()
     stack = []
     program = []
@@ -263,9 +277,17 @@ def compile_tokens_to_program(tokens):
                     print("%s:%d:%d: ERROR: expected include path to be %s but found %s" % (token["loc"] + (human(Token.STR), human(token["type"]))))
                     exit(1)
 
-                try:
-                    rtokens += reversed(lex_file(token["value"]))
-                except FileNotFoundError:
+                fileIncluded = False
+                for p in includePaths:
+                    try:
+                        rtokens += reversed(lex_file(path.join(p,token["value"])))
+                        fileIncluded = True
+                        break
+                    except FileNotFoundError:
+                        continue
+                
+                if not fileIncluded:
+                    print(includePaths,token["value"])
                     print("%s:%d:%d: ERROR: `%s` file not found" % (token["loc"] + (token["value"],)))
                     exit()
                 
@@ -323,9 +345,9 @@ OP is a dict with the follwing possible fields
 - `jmp` -- It is an optional field and is used for code blocks like if,else, while, end etc. It is created in compile_tokens_to_program
 """
 
-def load_program(program_token):
+def load_program(program_token,includePaths=[]):
     tokens = lex_file(program_token)
-    program = compile_tokens_to_program(tokens)
+    program = compile_tokens_to_program(tokens, includePaths)
     return program
 
 def compile_program(program, outFilePath):
@@ -393,7 +415,7 @@ def compile_program(program, outFilePath):
                 else:
                     lt.append(f"      ;-- end --\n")
 
-            assert len(Intrinsic) == 21, f"Exaustive handling of Intrinsic's in Compiling {len(Intrinsic)}"
+            assert len(Intrinsic) == 26, f"Exaustive handling of Intrinsic's in Compiling {len(Intrinsic)}"
             if op["type"] == OP.INTRINSIC:
 
                 if op["value"] == Intrinsic.EXIT:
@@ -419,6 +441,21 @@ def compile_program(program, outFilePath):
                     lt.append("      sub eax, ebx\n")
                     lt.append("      push eax\n")
 
+                if op["value"] == Intrinsic.DIVMOD:
+                    lt.append("      xor edx, edx\n")
+                    lt.append("      pop ebx\n")
+                    lt.append("      pop eax\n")
+                    lt.append("      div ebx\n")
+                    lt.append("      push eax\n")
+                    lt.append("      push edx\n")
+                    
+                elif op["value"] == Intrinsic.MUL:
+                    lt.append("    ;; -- mul --\n")
+                    lt.append("    pop  eax\n")
+                    lt.append("    pop  ebx\n")
+                    lt.append("    mul  ebx\n")
+                    lt.append("    push eax\n")
+
                 if op["value"] == Intrinsic.EQUAL:
                     lt.append(f"     ; -- equal --\n")
                     lt.append(f"      pop eax\n")
@@ -430,6 +467,19 @@ def compile_program(program, outFilePath):
                     lt.append(f"      ZERO{i}:\n")
                     lt.append(f"          push 0\n")
                     lt.append(f"      END{i}:\n")
+                                
+                if op["value"] == Intrinsic.NE:
+                    lt.append(f"     ; -- equal --\n")
+                    lt.append(f"      pop eax\n")
+                    lt.append(f"      pop ebx\n")
+                    lt.append(f"      cmp eax, ebx\n")
+                    lt.append(f"      je ZERO{i}\n")
+                    lt.append(f"      push 1\n")
+                    lt.append(f"      jmp END{i}\n")
+                    lt.append(f"      ZERO{i}:\n")
+                    lt.append(f"          push 0\n")
+                    lt.append(f"      END{i}:\n")
+
 
                 if op["value"] == Intrinsic.GT:
                     lt.append(f"     ; -- greater than --\n")
@@ -513,12 +563,27 @@ def compile_program(program, outFilePath):
                     lt.append("      xor ebx, ebx\n")
                     lt.append("      mov bl, [eax]\n")
                     lt.append("      push ebx\n")
+            
+                if op["value"] == Intrinsic.LOAD32:
+                    lt.append("      ;-- load (,) --\n")
+                    lt.append("      pop eax\n")
+                    lt.append("      xor ebx, ebx\n")
+                    lt.append("      mov ebx, [eax]\n")
+                    lt.append("      push ebx\n")
+
 
                 if op["value"] == Intrinsic.STORE:
                     lt.append("      ;-- store (.) --\n")
                     lt.append("      pop  eax\n")
                     lt.append("      pop  ebx\n")
                     lt.append("      mov  byte ptr [ebx], al\n")
+
+                if op["value"] == Intrinsic.STORE32:
+                    lt.append("      ;-- store (.) --\n")
+                    lt.append("      pop  eax\n")
+                    lt.append("      pop  ebx\n")
+                    lt.append("      mov  [ebx], eax\n")
+
 
                 if op["value"] == Intrinsic.PRINT:
                     lt.append("      ;-- print --\n")
@@ -580,7 +645,6 @@ def simulate_program(program):
     mem = bytearray(MEM_CAPACITY + STR_CAPACITY)
     strPtr = STR_CAPACITY
     i = 0
-    print(program)
     while i < len(program):
         op = program[i]
 
@@ -635,9 +699,11 @@ def simulate_program(program):
 
         elif op["type"] == OP.INTRINSIC:
         
-            assert len(Intrinsic) == 21, f"Exaustive handling of Intrinsic's in Simulation {len(Intrinsic)}"
+            assert len(Intrinsic) == 26, f"Exaustive handling of Intrinsic's in Simulation {len(Intrinsic)}"
             if op["value"] == Intrinsic.EXIT:
-                exit()
+                if i != len(program) - 1:
+                    exit()
+                i += 1
 
             if op["value"] == Intrinsic.DROP:
                 stack.pop()
@@ -654,11 +720,36 @@ def simulate_program(program):
                 b = stack.pop()
                 stack.append(b-a)
                 i += 1
+            
+            elif op["value"] == Intrinsic.DIVMOD:
+                a = stack.pop()
+                b = stack.pop()
+                stack.append(b//a)
+                stack.append(b%a)
+                i += 1
+
+            elif op["value"] == Intrinsic.MUL:
+                a = stack.pop()
+                b = stack.pop()
+                stack.append(b*a)
+                i += 1
 
             elif op["value"] == Intrinsic.EQUAL:
                 a = stack.pop()
                 b = stack.pop()
                 stack.append(int(a == b))
+                i += 1
+
+            elif op["value"] == Intrinsic.NE:
+                a = stack.pop()
+                b = stack.pop()
+                stack.append(int(a != b))
+                i += 1
+            
+            elif op["value"] == Intrinsic.NE:
+                a = stack.pop()
+                b = stack.pop()
+                stack.append(int(a != b))
                 i += 1
 
             elif op["value"] == Intrinsic.GT:
@@ -679,39 +770,23 @@ def simulate_program(program):
                 i += 1
 
             elif op["value"] == Intrinsic.DUP2:
-                a = stack.pop()
-                b = stack.pop()
-
-                stack.append(b)
-                stack.append(a)
-                stack.append(b)
-                stack.append(a)
+                stack.append(stack[-2])
+                stack.append(stack[-2])
                 i += 1
 
 
             elif op["value"] == Intrinsic.OVER:
-                a = stack.pop()
-                b = stack.pop()
-                stack.append(b)
-                stack.append(a)
-                stack.append(b)
+                stack.append(stack[-2])
                 i += 1
 
             elif op["value"] == Intrinsic.OVER2:
-                a = stack.pop()
-                b = stack.pop()
-                c = stack.pop()
-                stack.append(c)
-                stack.append(b)
-                stack.append(a)
-                stack.append(c)
+                stack.append(stack[-3])
                 i += 1
 
             elif op["value"] == Intrinsic.SWAP:
-                a = stack.pop()
-                b = stack.pop()
-                stack.append(a)
-                stack.append(b)
+                temp = stack[-1]
+                stack[-1] = stack[-2]
+                stack[-2] = temp
                 i += 1
 
             elif op["value"] == Intrinsic.DUMP:
@@ -729,10 +804,27 @@ def simulate_program(program):
                 stack.append(byte)
                 i += 1
 
+            elif op["value"] == Intrinsic.LOAD32:
+                addr = stack.pop()
+                _bytes = bytearray(4)
+                for offset in range(0,4):
+                    _bytes[offset] = mem[addr + offset]
+                stack.append(int.from_bytes(_bytes, byteorder=sys.byteorder))
+                i += 1
+
             elif op["value"] == Intrinsic.STORE:
                 val = stack.pop()
                 addr = stack.pop()
                 mem[addr] = val & 0xFF
+                i += 1
+
+            elif op["value"] == Intrinsic.STORE32:
+                store_value = stack.pop()
+                store_value32 = store_value.to_bytes(length=4, byteorder=sys.byteorder, signed=(store_value < 0))
+                store_addr32 = stack.pop()
+                for byte in store_value32:
+                    mem[store_addr32] = byte
+                    store_addr32 += 1;
                 i += 1
 
             elif op["value"] == Intrinsic.PRINT:
@@ -768,9 +860,9 @@ def simulate_program(program):
                 stack.append(a & b)
                 i += 1
         # if "value" in op: 
-        #     print(op["type"],op["value"] , stack, mem[:31])
+            # print(op["type"],op["value"] , stack, mem[:31])
         # else:
-        #     print(op["type"], stack, mem[:31])
+            # print(op["type"], stack, mem[:31])
         # input()
 
 def usage(program_token):
@@ -800,6 +892,7 @@ def main():
         exit()
 
     includePaths = [".", "./std/"]
+    timed = False
 
     while len(argv) > 0:
         if argv[0] == "-I":
@@ -810,6 +903,9 @@ def main():
                 exit(1)
             includePath, *argv = argv
             includePaths.append(includePath)
+        if argv[0] == "-t":
+            timed = True
+            argv = argv[1:]
         else:
             break
     
@@ -827,9 +923,17 @@ def main():
             print("[ERROR] no input file is provided for the simulation", file=sys.stderr)
             exit(1)
         programPath, *argv = argv
-        program = load_program(programPath)
+        if timed:
+            programBuildTime = time.time()
+        program = load_program(programPath, includePaths)
+        if timed:
+            print(f"[TIME] Program Build Time: {time.time() - programBuildTime} secs")
+            programBuildTime = time.time()
+
         print("[INFO] loaded program")
         simulate_program(program)
+        if timed:
+            print(f"[TIME] Run Time: {time.time() - programBuildTime} secs")
     
     elif subcommand == "com":
         run = False
@@ -868,14 +972,21 @@ def main():
             else:
                 usage(compilerPath)
                 print("[ERROR] Invalid Path entered")
-        program = load_program(programPath)
+        if timed:
+            start = time.time()
+        program = load_program(programPath, includePaths)
         print("[INFO] loaded program")
         compile_program(program,f"{basePath}.asm")
         print(f"[INFO] Generated {basePath}.asm")
         callCmd(["ml","/Fo" ,f"{basePath}.obj", "/c", "/Zd", "/coff", f"{basePath}.asm"])
-        callCmd(["Link",f"/OUT:{basePath}.exe", "/SUBSYSTEM:CONSOLE", f"{basePath}.obj"])
+        callCmd(["Link",f"/OUT:{basePath}.exe", "/SUBSYSTEM:CONSOLE",  f"{basePath}.obj"])
+        if timed:
+            print(f"[TIME] Compile Time: {time.time() - start} secs")
+            start = time.time()
         if run:
             callCmd([f"{basePath}.exe"])
+            if timed:
+                print(f"[TIME] Run Time: {time.time()- start} secs")
     
 
 if __name__ == "__main__":

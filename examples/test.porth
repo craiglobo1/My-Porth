@@ -1,3 +1,11 @@
-include "examples/macro.porth"
+include "std.porth"
 
-writeH
+macro base 10 end
+
+// i 
+0 while dup 10 < do
+    mem over + '*' .
+    mem print
+    "\n" print
+    1 +
+end

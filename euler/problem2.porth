@@ -1,0 +1,20 @@
+include "std.porth"
+
+macro a mem end
+macro b mem 4 + end
+macro sum mem 8 + end
+
+a 0 store32
+b 1 store32
+
+
+while a load32 4000000   < do
+    a load32 2 mod 0 = if
+        sum a load32 sum load32 + store32
+    end
+    a load32 
+    b load32 +
+    a b load32 store32
+    b swap store32
+end
+sum load32 dump

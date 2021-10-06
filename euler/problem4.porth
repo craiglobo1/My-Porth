@@ -1,0 +1,30 @@
+include "std.porth"
+
+macro straight mem end
+macro reverse mem 4 + end
+macro ans mem 8 + end
+
+100 while dup 1000 < do
+    100 while dup 1000 < do
+        2dup *
+        dup
+        straight swap store32
+        reverse 0 store32
+        while straight load32 0 != do
+            straight load32
+            10 divmod
+            reverse load32 10 * +
+            reverse swap store32
+            straight swap store32
+        end
+        reverse load32 = if
+            reverse load32 ans load32 > if 
+                ans reverse load32 store32
+            end
+        end
+        1 +
+        end drop
+    1 +
+end drop
+
+ans load32 dump

@@ -1,0 +1,5 @@
+macro / divmod drop end
+macro % divmod swap drop end
+
+macro div divmod drop end
+macro mod divmod swap drop end
