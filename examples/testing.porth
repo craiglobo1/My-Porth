@@ -1,0 +1,5 @@
+"newfile2.txt" fopen
+dup dup // mem swap .
+"hello world\n" 12 fwrite
+"hello world\n" 12 fwrite
+fclose

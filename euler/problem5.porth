@@ -1,0 +1,14 @@
+include "std.porth"
+
+// 2520 is the smallest number that can be divided by each of the numbers from 1 to 10 without any remainder.
+// What is the smallest positive number that is evenly divisible by all of the numbers from 1 to 20?
+
+// 2520 i 2520%i 
+
+1 while dup 1000000 < do
+    mem 21 store32
+    mem load32 drop
+    // 12 21 swap
+    // drop drop
+    1 +
+end

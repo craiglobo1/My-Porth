@@ -3,6 +3,15 @@ include "std.porth"
 macro straight mem end
 macro reverse mem 4 + end
 macro ans mem 8 + end
+macro isPalindrome
+    while straight load32 0 != do
+        straight load32
+        10 divmod
+        reverse load32 10 * +
+        reverse swap store32
+        straight swap store32
+    end
+end
 
 100 while dup 1000 < do
     100 while dup 1000 < do
@@ -10,13 +19,7 @@ macro ans mem 8 + end
         dup
         straight swap store32
         reverse 0 store32
-        while straight load32 0 != do
-            straight load32
-            10 divmod
-            reverse load32 10 * +
-            reverse swap store32
-            straight swap store32
-        end
+        isPalindrome
         reverse load32 = if
             reverse load32 ans load32 > if 
                 ans reverse load32 store32

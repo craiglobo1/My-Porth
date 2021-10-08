@@ -4,6 +4,10 @@ import subprocess
 from os import path, getcwd
 from collections import deque
 import time
+from copy import copy
+
+
+EXPANSION_LIMIT = 1000
 
 class Token(Enum):
     INT = auto()
@@ -23,8 +27,11 @@ class Keyword(Enum):
     END = auto()
 
 class Intrinsic(Enum):
-    # os operations
+    # win32 api operations
     PRINT = auto()
+    FOPEN = auto()
+    FWRITE = auto()
+    FCLOSE = auto()
     EXIT = auto()
     # arithmetic operations
     ADD = auto()
@@ -67,6 +74,52 @@ class OP(Enum):
     DO = auto()
     END = auto()
     INTRINSIC = auto()
+
+assert len(Keyword) == 7, f"Exhaustive handling in KEYWORD NAMES {len(Keyword)}"
+KEYWORD_NAMES = {
+"if"    : Keyword.IF,
+"else"  : Keyword.ELSE,
+"while" : Keyword.WHILE,
+"do"    : Keyword.DO,
+"macro" : Keyword.MACRO,
+"include": Keyword.INCLUDE,
+"end"   : Keyword.END,
+}
+
+assert len(Intrinsic) == 29 , f"Exhaustive handling in INTRINSIC_WORDS {len(Intrinsic)}"
+INTRINSIC_WORDS = {
+"print" : Intrinsic.PRINT,
+"exit"  : Intrinsic.EXIT,
+"fopen" : Intrinsic.FOPEN,
+"fwrite" : Intrinsic.FWRITE,
+"fclose" : Intrinsic.FCLOSE,
+"+"     : Intrinsic.ADD,
+"-"     : Intrinsic.SUB,
+"divmod": Intrinsic.DIVMOD,
+"*"     : Intrinsic.MUL,
+"dump"  : Intrinsic.DUMP,
+"="     : Intrinsic.EQUAL,
+"!="    : Intrinsic.NE,
+">"     : Intrinsic.GT,
+"<"     : Intrinsic.LT,
+"drop"  : Intrinsic.DROP,
+"dup"   : Intrinsic.DUP,
+"2dup"  : Intrinsic.DUP2,
+"swap"  : Intrinsic.SWAP,
+"over"  : Intrinsic.OVER,
+"2over" : Intrinsic.OVER2,
+"mem"   : Intrinsic.MEM,
+"."     : Intrinsic.STORE,
+","     : Intrinsic.LOAD,
+"store32":Intrinsic.STORE32,
+"load32": Intrinsic.LOAD32,
+"shl"   : Intrinsic.SHL,
+"shr"   : Intrinsic.SHR,
+"bor"   : Intrinsic.BOR,
+"band"  : Intrinsic.BAND
+}
+
+
 
 def find_col(line, start, predicate):
     while start < len(line) and predicate(line[start]):
@@ -112,7 +165,9 @@ Token is a dict with the follwing possible fields
 - `type` -- The type of the OP. One of Token.INT, Token.WORD etc
 - `loc` -- location of the OP in the program it contains (`file_token`,  `row`, `col`)
 - `value` -- the value of the token depending on the type of the Token. For `str` it's Token.WORD and For `int` it's Token.INT
+- `expanded` -- the counter for the number of tokens expanded from OP.MACRO and OP.INCLUDE
 """
+
 
 def lex_file(file_path):
     with open(file_path, "r") as f:
@@ -120,47 +175,11 @@ def lex_file(file_path):
                 for (row, line) in enumerate(f.readlines())
                 for (col, (token, tokenVal)) in lex_line(file_path, row, line.split('//')[0],)]
 
-
-assert len(Keyword) == 7, f"Exhaustive handling in KEYWORD NAMES {len(Keyword)}"
-KEYWORD_NAMES = {
-"if"    : Keyword.IF,
-"else"  : Keyword.ELSE,
-"while" : Keyword.WHILE,
-"do"    : Keyword.DO,
-"macro" : Keyword.MACRO,
-"include": Keyword.INCLUDE,
-"end"   : Keyword.END,
-}
-
-assert len(Intrinsic) == 26 , f"Exhaustive handling in INTRINSIC_WORDS {len(Intrinsic)}"
-INTRINSIC_WORDS = {
-"exit"  : Intrinsic.EXIT,
-"+"     : Intrinsic.ADD,
-"-"     : Intrinsic.SUB,
-"divmod": Intrinsic.DIVMOD,
-"*"     : Intrinsic.MUL,
-"dump"  : Intrinsic.DUMP,
-"="     : Intrinsic.EQUAL,
-"!="    : Intrinsic.NE,
-">"     : Intrinsic.GT,
-"<"     : Intrinsic.LT,
-"drop"  : Intrinsic.DROP,
-"dup"   : Intrinsic.DUP,
-"2dup"  : Intrinsic.DUP2,
-"swap"  : Intrinsic.SWAP,
-"over"  : Intrinsic.OVER,
-"2over" : Intrinsic.OVER2,
-"mem"   : Intrinsic.MEM,
-"."     : Intrinsic.STORE,
-","     : Intrinsic.LOAD,
-"store32":Intrinsic.STORE32,
-"load32": Intrinsic.LOAD32,
-"print" : Intrinsic.PRINT,
-"shl"   : Intrinsic.SHL,
-"shr"   : Intrinsic.SHR,
-"bor"   : Intrinsic.BOR,
-"band"  : Intrinsic.BAND
-}
+def expandMacro(token):
+    if "expanded" not in token:
+        token["expanded"] = 0
+    token["expanded"] += 1
+    return token
 
 """
 Macro is a Dictionary
@@ -187,11 +206,21 @@ def compile_tokens_to_program(tokens,includePaths=[]):
                 program.append(op)
                 ip += 1
             elif token["value"] in macros:
-                rtokens += reversed(macros[token["value"]]["tokens"])
-                continue
+                mtk =  map(expandMacro, reversed(macros[token["value"]]["tokens"]))
+                mtk = list(mtk)
+
+                if len(list(mtk)) == 0:
+                    sys.exit("%s:%d:%d: error: macro is empty" %  token["loc"])
+
+                if len(list(mtk)) != 0:
+                    rtokens += mtk
+
+                    if EXPANSION_LIMIT < rtokens[-1]["expanded"]:
+                        sys.exit("%s:%d:%d: error: macro exansion limit of %d exceeded" %  (token["loc"] + (EXPANSION_LIMIT, )))
+                    continue
             else:
-                print("%s:%d:%d: unknown word `%s`" % (token["loc"] + (token["value"], )))
-                exit(1)
+                sys.exit("%s:%d:%d: unknown word `%s`" % (token["loc"] + (token["value"], )))
+            
 
         elif token["type"] == Token.INT:
             op["type"]= OP.PUSH_INT
@@ -229,8 +258,7 @@ def compile_tokens_to_program(tokens,includePaths=[]):
                 program.append(op)
                 if_ip = stack.pop()
                 if program[if_ip]["type"] != OP.IF:
-                    print('%s:%d:%d: ERROR: `else` can only be used in `if`-blocks' % program[if_ip]["loc"])
-                    exit(1)
+                    sys.exit('%s:%d:%d: ERROR: `else` can only be used in `if`-blocks' % program[if_ip]["loc"])
                 program[if_ip]["jmp"] = ip + 1
                 stack.append(ip)
                 ip += 1
@@ -248,8 +276,7 @@ def compile_tokens_to_program(tokens,includePaths=[]):
                     program[ip]["jmp"] = program[block_ip]["jmp"]
                     program[block_ip]["jmp"] = ip + 1
                 else:
-                    print('%s:%d:%d: ERROR: `end` can only close `if`, `else` or `do` blocks for now' % program[block_ip]["loc"])
-                    exit(1)
+                    sys.exit('%s:%d:%d: ERROR: `end` can only close `if`, `else` or `do` blocks for now' % program[block_ip]["loc"])
                 ip += 1
 
             elif token["value"] == Keyword.WHILE:
@@ -270,12 +297,10 @@ def compile_tokens_to_program(tokens,includePaths=[]):
 
             elif token["value"] == Keyword.INCLUDE:
                 if len(rtokens) == 0:
-                    print("%s:%d:%d: ERROR: expected include path but found nothing" % op["loc"])
-                    exit(1)
+                    sys.exit("%s:%d:%d: ERROR: expected include path but found nothing" % op["loc"])
                 token = rtokens.pop()
                 if token["type"] != Token.STR:
-                    print("%s:%d:%d: ERROR: expected include path to be %s but found %s" % (token["loc"] + (human(Token.STR), human(token["type"]))))
-                    exit(1)
+                    sys.exit("%s:%d:%d: ERROR: expected include path to be %s but found %s" % (token["loc"] + (human(Token.STR), human(token["type"]))))
 
                 fileIncluded = False
                 for p in includePaths:
@@ -288,50 +313,59 @@ def compile_tokens_to_program(tokens,includePaths=[]):
                 
                 if not fileIncluded:
                     print(includePaths,token["value"])
-                    print("%s:%d:%d: ERROR: `%s` file not found" % (token["loc"] + (token["value"],)))
-                    exit()
+                    sys.exit("%s:%d:%d: ERROR: `%s` file not found" % (token["loc"] + (token["value"],)))
                 
             # TODO: capability to define macros from command line
             elif token["value"] == Keyword.MACRO:
                 if len(rtokens) == 0:
-                    print("%s:%d:%d: ERROR: expected macro name but found nothing" % op["loc"])
-                    exit(1)
+                    sys.exit("%s:%d:%d: ERROR: expected macro name but found nothing" % token["loc"])
                 token = rtokens.pop()
+
                 if token["type"] != Token.WORD:
-                    print("%s:%d:%d: ERROR: expected macro name to be %s but found %s" % (token["loc"] + (human(Token.WORD), human(token["type"]))))
-                    exit(1)
+                    sys.exit("%s:%d:%d: ERROR: expected macro name to be %s but found %s" % (token["loc"] + (human(Token.WORD), human(token["type"]))))
+
                 assert isinstance(token["value"], str), "This is probably a bug in the lexer"
                 if token["value"] in macros:
                     print("%s:%d:%d: ERROR: redefinition of already existing macro `%s`" % (token["loc"] + (token["value"], )))
-                    print("%s:%d:%d: NOTE: the first definition is located here" % macros[token["value"]]["loc"])
-                    exit(1)
+                    sys.exit("%s:%d:%d: NOTE: the first definition is located here" % macros[token["value"]]["loc"])
+
                 if token["value"] in INTRINSIC_WORDS:
                     print("%s:%d:%d: ERROR: redefinition of a builtin word `%s`" % (token["loc"] + (token["value"], )))
-                    exit(1)
 
                 macro = {"loc" : token["loc"], "tokens" : []}
                 macros[token["value"]] = macro
 
                 # TODO: support for nested blocks within the macro definition
+                nestAmt = 0
                 while len(rtokens) > 0:
                     token = rtokens.pop()
+                    assert len(Keyword) == 7, f"Exaustive handling of keywords in compile_tokens_to_program for end type starters like Keyword.IF, Keyword.DO {len(Keyword)}"
+                    if token["type"] == Token.KEYWORD and token["value"] in [Keyword.IF, Keyword.DO]:
+                        nestAmt += 1
+
+                    macro["tokens"].append(token)
+
                     if token["type"] == Token.KEYWORD and token["value"] == Keyword.END:
-                        break
-                    else:
-                        macro["tokens"].append(token)
-                    
+                        if nestAmt == 0:
+                            break
+                        elif nestAmt > 0:
+                            nestAmt -= 1
+                        else:
+                            sys.exit(f"Error: nest amt is below zero {nestAmt}")
+
                 if token["type"] != Token.KEYWORD or token["value"] != Keyword.END:
-                    print("%s:%d:%d: ERROR: expected `end` at the end of the macro definition but got `%s`" % (token["loc"] + (token["value"], )))
-                    exit(1)
+                    sys.exit("%s:%d:%d: ERROR: expected `end` at the end of the macro definition of `%s`" % (token["loc"] + (token["value"], )))
+                else:
+                    macro["tokens"] = macro["tokens"][:-1]
+                    
             else:
-                # print(token)
                 assert False, 'unreachable'
         else:
             assert False, 'unreachable'
 
     if len(stack) > 0:
-        print('%s:%d:%d: ERROR: unclosed block' % program[stack.pop()]["loc"])
-        exit(1)
+        op = stack.pop()
+        sys.exit('%s:%d:%d: ERROR: unclosed block `%s`' % (program[op]["loc"] + (human(program[op]["type"]),)))
     program.append({"type" : OP.INTRINSIC,"value": Intrinsic.EXIT})
 
     return program
@@ -376,8 +410,7 @@ def compile_program(program, outFilePath):
             
             if op["type"] == OP.IF:
                 if "jmp" not in op:
-                    print("%s:%d:%d ERROR: `if` can only be used when an `end` is mentioned" % program[i]["loc"])
-                    exit(1)
+                    sys.exit("%s:%d:%d ERROR: `if` can only be used when an `end` is mentioned" % program[i]["loc"])
                 jmpArg = op["jmp"]
                 lt.append(f" ; -- if --\n")
                 lt.append("      pop eax\n")
@@ -386,8 +419,7 @@ def compile_program(program, outFilePath):
             
             if op["type"] == OP.ELSE:
                 if "jmp" not in op:
-                    print("%s:%d:%d ERROR: `else` can only be used when an `end` is mentioned" % program[i]["loc"])
-                    exit(1)
+                    sys.exit("%s:%d:%d ERROR: `else` can only be used when an `end` is mentioned" % program[i]["loc"])
                 jmpArg = op["jmp"]
                 lt.append(f" ; -- else --\n")
                 lt.append(f"      jmp addr_{jmpArg}\n")
@@ -397,8 +429,7 @@ def compile_program(program, outFilePath):
 
             if op["type"] == OP.DO:
                 if "jmp" not in op:
-                    print("%s:%d:%d ERROR: `do` can only be used when an `end` is mentioned" % program[i]["loc"])
-                    exit(1)
+                    sys.exit("%s:%d:%d ERROR: `do` can only be used when an `end` is mentioned" % program[i]["loc"])
                 jmp_idx = op["jmp"]
                 lt.append(f" ; -- do --\n")
                 lt.append( "      pop eax\n")
@@ -415,8 +446,28 @@ def compile_program(program, outFilePath):
                 else:
                     lt.append(f"      ;-- end --\n")
 
-            assert len(Intrinsic) == 26, f"Exaustive handling of Intrinsic's in Compiling {len(Intrinsic)}"
+            assert len(Intrinsic) == 29, f"Exaustive handling of Intrinsic's in Compiling {len(Intrinsic)}"
             if op["type"] == OP.INTRINSIC:
+
+                if op["value"] == Intrinsic.PRINT:
+                    lt.append("      ;-- print --\n")
+                    lt.append("      pop eax\n")
+                    lt.append("      invoke StdOut, addr [eax]\n")
+                
+                if op["value"] == Intrinsic.FOPEN:
+                    lt.append("     pop eax\n")
+                    lt.append("     invoke CreateFile , eax, GENERIC_READ OR GENERIC_WRITE, FILE_SHARE_READ OR FILE_SHARE_WRITE, NULL, OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL, NULL\n")
+                    lt.append("     push eax\n")
+                
+                if op["value"] == Intrinsic.FWRITE:
+                    lt.append("     pop ebx\n")
+                    lt.append("     pop edi\n")
+                    lt.append("     pop eax\n")
+                    lt.append("     invoke WriteFile, eax, edi, ebx, NULL, NULL\n")
+
+                if op["value"] == Intrinsic.FCLOSE:
+                    lt.append("     pop eax\n")
+                    lt.append("     invoke CloseHandle, eax\n")
 
                 if op["value"] == Intrinsic.EXIT:
                     lt.append("     ; -- exit --\n")
@@ -585,11 +636,6 @@ def compile_program(program, outFilePath):
                     lt.append("      mov  [ebx], eax\n")
 
 
-                if op["value"] == Intrinsic.PRINT:
-                    lt.append("      ;-- print --\n")
-                    lt.append("      pop eax\n")
-                    lt.append("      invoke StdOut, addr [eax]\n")
-
                 if op["value"] == Intrinsic.SHL:
                     lt.append("      ;-- shl --\n")
                     lt.append("      pop ecx\n")
@@ -667,8 +713,7 @@ def simulate_program(program):
         elif op["type"] == OP.IF:
             a = stack.pop()
             if "jmp" not in op:
-                print("%s:%d:%d ERROR: `if` can only be used when an `end` is mentioned" % program[i]["loc"])
-                exit(1)
+                sys.exit("%s:%d:%d ERROR: `if` can only be used when an `end` is mentioned" % program[i]["loc"])
             if a == 0:
                 i = op["jmp"]
             else:
@@ -676,8 +721,7 @@ def simulate_program(program):
 
         elif op["type"] == OP.ELSE:
             if "jmp" not in op:
-                print("%s:%d:%d ERROR: `else` can only be used when an `end` is mentioned" % program[i]["loc"])
-                exit(1)
+                sys.exit("%s:%d:%d ERROR: `else` can only be used when an `end` is mentioned" % program[i]["loc"])
             i = op["jmp"]
         
         elif op["type"] == OP.WHILE:
@@ -685,8 +729,7 @@ def simulate_program(program):
 
         elif op["type"] == OP.DO:
             if "jmp" not in op:
-                print("%s:%d:%d ERROR: `do` can only be used when an `end` is mentioned" % program[i]["loc"])
-                exit(1)
+                sys.exit("%s:%d:%d ERROR: `do` can only be used when an `end` is mentioned" % program[i]["loc"])
 
             a = stack.pop()
             if a == 0:
@@ -806,10 +849,7 @@ def simulate_program(program):
 
             elif op["value"] == Intrinsic.LOAD32:
                 addr = stack.pop()
-                _bytes = bytearray(4)
-                for offset in range(0,4):
-                    _bytes[offset] = mem[addr + offset]
-                stack.append(int.from_bytes(_bytes, byteorder=sys.byteorder))
+                stack.append(mem[addr] | (mem[addr + 1]<<8) | (mem[addr + 2]<<16) | (mem[addr + 3]<<24) )
                 i += 1
 
             elif op["value"] == Intrinsic.STORE:
@@ -820,11 +860,11 @@ def simulate_program(program):
 
             elif op["value"] == Intrinsic.STORE32:
                 store_value = stack.pop()
-                store_value32 = store_value.to_bytes(length=4, byteorder=sys.byteorder, signed=(store_value < 0))
                 store_addr32 = stack.pop()
-                for byte in store_value32:
-                    mem[store_addr32] = byte
-                    store_addr32 += 1;
+                mem[store_addr32 + 0] = store_value & 0xff
+                mem[store_addr32 + 1] = (store_value>>8) & 0xff
+                mem[store_addr32 + 2] = (store_value>>16) & 0xff
+                mem[store_addr32 + 3] = (store_value>>24) & 0xff
                 i += 1
 
             elif op["value"] == Intrinsic.PRINT:
@@ -888,8 +928,7 @@ def main():
     compilerPath, *argv = argv
     if len(sys.argv) < 2:
         usage(sys.argv[0])
-        print("\n[ERROR] No subcommand Given")
-        exit()
+        sys.exit("\n[ERROR] No subcommand Given")
 
     includePaths = [".", "./std/"]
     timed = False
@@ -899,8 +938,8 @@ def main():
             argv = argv[1:]
             if len(argv) == 0:
                 usage(compilerPath)
-                print("[ERROR] no path is provided for `-I` flag", file=sys.stderr)
-                exit(1)
+                sys.exit("[ERROR] no path is provided for `-I` flag", file=sys.stderr)
+
             includePath, *argv = argv
             includePaths.append(includePath)
         if argv[0] == "-t":
@@ -911,8 +950,7 @@ def main():
     
     if len(argv) < 1:
         usage(compilerPath)
-        print("[ERROR] no subcommand is provided", file=sys.stderr)
-        exit(1)
+        sys.exit("[ERROR] no subcommand is provided", file=sys.stderr)
     subcommand, *argv = argv 
 
     programPath = None
@@ -920,8 +958,7 @@ def main():
     if subcommand == "sim":
         if len(argv) < 1:
             usage(compilerPath)
-            print("[ERROR] no input file is provided for the simulation", file=sys.stderr)
-            exit(1)
+            sys.exit("[ERROR] no input file is provided for the simulation", file=sys.stderr)
         programPath, *argv = argv
         if timed:
             programBuildTime = time.time()
@@ -945,8 +982,7 @@ def main():
             elif arg == "-o":
                 if len(argv) == 0:
                     usage(compilerPath)
-                    print("[ERROR] no argument is provided for parameter -o", file=sys.stderr)
-                    exit(1)
+                    sys.exit("[ERROR] no argument is provided for parameter -o", file=sys.stderr)
                 outputPath, *argv = argv
             elif arg == "-ob":
                 outputPath = "./build/"
@@ -955,8 +991,7 @@ def main():
                 break
         if programPath == None:
             usage(compilerPath)
-            print("[ERROR] no input file is provided for the compilation", file=sys.stderr)
-            exit(1)
+            sys.exit("[ERROR] no input file is provided for the compilation", file=sys.stderr)
         
         if outputPath == None:
             baseDir = getcwd()

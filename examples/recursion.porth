@@ -1,0 +1,7 @@
+macro hey
+    foo
+end
+macro foo
+    hey
+end
+hey

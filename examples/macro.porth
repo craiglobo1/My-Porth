@@ -1,2 +1,4 @@
-macro writeH "hello world\n" print end
-macro writeN "not welcome world\n" print end
+macro isGreaterThan10 
+    10
+end
+11 isGreaterThan10
