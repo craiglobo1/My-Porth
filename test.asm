@@ -20,6 +20,8 @@
 
 .data?
     mem db ?
+    buffer db ?
+
 .code
     start PROC
     invoke CreateFile , addr filename, GENERIC_READ OR GENERIC_WRITE, FILE_SHARE_READ OR FILE_SHARE_WRITE, NULL, OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL, NULL
@@ -28,11 +30,15 @@
 
     pop eax
     push eax
+    push eax
     lea edi, str1
-    invoke WriteFile, eax, edi, 10, NULL, NULL
-    invoke SetFilePointer,eax,10,0,FILE_CURRENT
+    invoke ReadFile, eax, addr buffer, 10, NULL, NULL
+    invoke StdOut, addr buffer
     pop eax
-    invoke WriteFile, eax, edi, 10, NULL, NULL
+    invoke SetFilePointer, eax,0,0,FILE_BEGIN
+    pop eax
+    invoke SetEndOfFile, eax
+
 
      ; -- push int 23 --
       push 23

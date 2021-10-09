@@ -24,6 +24,8 @@ class Keyword(Enum):
     DO = auto()
     MACRO = auto()
     INCLUDE = auto()
+    SYSCALL = auto()
+    SYSVAL = auto()
     END = auto()
 
 class Intrinsic(Enum):
@@ -31,6 +33,7 @@ class Intrinsic(Enum):
     PRINT = auto()
     FOPEN = auto()
     FWRITE = auto()
+    FREAD = auto()
     FCLOSE = auto()
     EXIT = auto()
     # arithmetic operations
@@ -67,6 +70,9 @@ class OP(Enum):
     # stack operations
     PUSH_INT = auto()
     PUSH_STR = auto()
+    # syscall
+    SYSCALL = auto()
+    SYSVAL = auto()
     # blocks
     IF = auto()
     ELSE = auto()
@@ -75,23 +81,26 @@ class OP(Enum):
     END = auto()
     INTRINSIC = auto()
 
-assert len(Keyword) == 7, f"Exhaustive handling in KEYWORD NAMES {len(Keyword)}"
+assert len(Keyword) == 9, f"Exhaustive handling in KEYWORD NAMES {len(Keyword)}"
 KEYWORD_NAMES = {
-"if"    : Keyword.IF,
-"else"  : Keyword.ELSE,
-"while" : Keyword.WHILE,
-"do"    : Keyword.DO,
-"macro" : Keyword.MACRO,
-"include": Keyword.INCLUDE,
-"end"   : Keyword.END,
+"if"    :   Keyword.IF,
+"else"  :   Keyword.ELSE,
+"while" :   Keyword.WHILE,
+"do"    :   Keyword.DO,
+"macro" :   Keyword.MACRO,
+"include":  Keyword.INCLUDE,
+"syscall":  Keyword.SYSCALL,
+"sysval":  Keyword.SYSVAL,
+"end"   :   Keyword.END,
 }
 
-assert len(Intrinsic) == 29 , f"Exhaustive handling in INTRINSIC_WORDS {len(Intrinsic)}"
+assert len(Intrinsic) == 30 , f"Exhaustive handling in INTRINSIC_WORDS {len(Intrinsic)}"
 INTRINSIC_WORDS = {
 "print" : Intrinsic.PRINT,
 "exit"  : Intrinsic.EXIT,
 "fopen" : Intrinsic.FOPEN,
 "fwrite" : Intrinsic.FWRITE,
+"fread" : Intrinsic.FREAD,
 "fclose" : Intrinsic.FCLOSE,
 "+"     : Intrinsic.ADD,
 "-"     : Intrinsic.SUB,
@@ -244,7 +253,7 @@ def compile_tokens_to_program(tokens,includePaths=[]):
             ip += 1
 
         elif token["type"] == Token.KEYWORD:
-            assert len(Keyword) == 7, "Exhaustive ops handling in compile_tokens_to_program. Only ops that form blocks must be handled"
+            assert len(Keyword) == 9, "Exhaustive ops handling in compile_tokens_to_program. Only ops that form blocks must be handled"
             if token["value"] == Keyword.IF:
                 op["type"] = OP.IF
                 op["loc"] = token["loc"]
@@ -294,6 +303,28 @@ def compile_tokens_to_program(tokens,includePaths=[]):
                 program[ip]["jmp"] = while_ip
                 stack.append(ip)
                 ip += 1
+                
+            elif token["value"] == Keyword.SYSCALL:
+                callName = rtokens.pop()
+                if callName["type"] != Token.STR:
+                    sys.exit("%s:%d:%d: ERROR: expected syscall name to be %s but found %s" % (token["loc"] + (human(Token.STR), human(token["type"]))))
+
+                op["type"] = OP.SYSCALL
+                op["value"] = callName["value"]
+                op["loc"] = token["loc"]
+                program.append(op)
+                ip += 1
+
+            elif token["value"] == Keyword.SYSVAL:
+                sysval = rtokens.pop()
+                if sysval["type"] != Token.STR:
+                    sys.exit("%s:%d:%d: ERROR: expected syscall name to be %s but found %s" % (token["loc"] + (human(Token.STR), human(token["type"]))))
+
+                op["type"] = OP.SYSVAL
+                op["value"] = sysval["value"]
+                op["loc"] = token["loc"]
+                program.append(op)
+                ip += 1
 
             elif token["value"] == Keyword.INCLUDE:
                 if len(rtokens) == 0:
@@ -314,6 +345,8 @@ def compile_tokens_to_program(tokens,includePaths=[]):
                 if not fileIncluded:
                     print(includePaths,token["value"])
                     sys.exit("%s:%d:%d: ERROR: `%s` file not found" % (token["loc"] + (token["value"],)))
+            
+
                 
             # TODO: capability to define macros from command line
             elif token["value"] == Keyword.MACRO:
@@ -339,7 +372,7 @@ def compile_tokens_to_program(tokens,includePaths=[]):
                 nestAmt = 0
                 while len(rtokens) > 0:
                     token = rtokens.pop()
-                    assert len(Keyword) == 7, f"Exaustive handling of keywords in compile_tokens_to_program for end type starters like Keyword.IF, Keyword.DO {len(Keyword)}"
+                    assert len(Keyword) == 9, f"Exaustive handling of keywords with `end` in compile_tokens_to_program for end type starters like Keyword.IF, Keyword.DO {len(Keyword)}"
                     if token["type"] == Token.KEYWORD and token["value"] in [Keyword.IF, Keyword.DO]:
                         nestAmt += 1
 
@@ -394,7 +427,7 @@ def compile_program(program, outFilePath):
         #add implementation of logic
         for i, op in enumerate(program):
             lt.append(f"addr_{i}:\n")
-            assert len(OP) == 8, "Exhaustive handling of operations whilst compiling"
+            assert len(OP) == 10, "Exhaustive handling of operations whilst compiling"
 
             if op["type"] == OP.PUSH_INT:
                 valToPush = op["value"]
@@ -407,6 +440,17 @@ def compile_program(program, outFilePath):
                 lt.append(f"      push edi\n")
                 strs.append(valToPush)
                 # assert False, "Not Implemented yet"
+            
+            if op["type"] == OP.SYSCALL:
+                callName = op["value"]
+                lt.append(f"     ; -- syscall {callName} --\n")
+                lt.append(f"      call {callName}\n")
+                lt.append(f"      push eax\n")
+
+            if op["type"] == OP.SYSVAL:
+                sysval = op["value"]
+                lt.append(f"     ; -- sysval {sysval} --\n")
+                lt.append(f"      push {sysval}\n")
             
             if op["type"] == OP.IF:
                 if "jmp" not in op:
@@ -446,7 +490,7 @@ def compile_program(program, outFilePath):
                 else:
                     lt.append(f"      ;-- end --\n")
 
-            assert len(Intrinsic) == 29, f"Exaustive handling of Intrinsic's in Compiling {len(Intrinsic)}"
+            assert len(Intrinsic) == 30, f"Exaustive handling of Intrinsic's in Compiling {len(Intrinsic)}"
             if op["type"] == OP.INTRINSIC:
 
                 if op["value"] == Intrinsic.PRINT:
@@ -455,17 +499,27 @@ def compile_program(program, outFilePath):
                     lt.append("      invoke StdOut, addr [eax]\n")
                 
                 if op["value"] == Intrinsic.FOPEN:
+                    lt.append("      ;-- fopen --\n")
                     lt.append("     pop eax\n")
                     lt.append("     invoke CreateFile , eax, GENERIC_READ OR GENERIC_WRITE, FILE_SHARE_READ OR FILE_SHARE_WRITE, NULL, OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL, NULL\n")
                     lt.append("     push eax\n")
                 
                 if op["value"] == Intrinsic.FWRITE:
+                    lt.append("      ;-- fwrite --\n")
                     lt.append("     pop ebx\n")
                     lt.append("     pop edi\n")
                     lt.append("     pop eax\n")
                     lt.append("     invoke WriteFile, eax, edi, ebx, NULL, NULL\n")
+                
+                if op["value"] == Intrinsic.FREAD:
+                    lt.append("      ;-- fread --\n")
+                    lt.append("     pop ebx\n")
+                    lt.append("     pop edi\n")
+                    lt.append("     pop eax\n")
+                    lt.append("     invoke ReadFile, eax, edi, ebx, NULL, NULL\n")
 
                 if op["value"] == Intrinsic.FCLOSE:
+                    lt.append("      ;-- fclose --\n")
                     lt.append("     pop eax\n")
                     lt.append("     invoke CloseHandle, eax\n")
 
@@ -493,6 +547,7 @@ def compile_program(program, outFilePath):
                     lt.append("      push eax\n")
 
                 if op["value"] == Intrinsic.DIVMOD:
+                    lt.append("    ; -- divmod --\n")
                     lt.append("      xor edx, edx\n")
                     lt.append("      pop ebx\n")
                     lt.append("      pop eax\n")
@@ -563,13 +618,13 @@ def compile_program(program, outFilePath):
                     lt.append("      call DUMP\n")
 
                 if op["value"] == Intrinsic.DUP:
-                    lt.append("      ; -- duplicate --\n")
+                    lt.append("      ; -- duplicate (dup) --\n")
                     lt.append("      pop eax\n")
                     lt.append("      push eax\n")
                     lt.append("      push eax\n")
 
                 if op["value"] == Intrinsic.DUP2:
-                    lt.append("      ; -- duplicate --\n")
+                    lt.append("      ; -- 2 duplicate (2dup) --\n")
                     lt.append("      pop  eax\n")
                     lt.append("      pop  ebx\n")
                     lt.append("      push ebx\n")
@@ -578,7 +633,7 @@ def compile_program(program, outFilePath):
                     lt.append("      push eax\n")
 
                 if op["value"] == Intrinsic.OVER:
-                    lt.append("      ; -- duplicate --\n")
+                    lt.append("      ; -- over --\n")
                     lt.append("      pop  eax\n")
                     lt.append("      pop  ebx\n")
                     lt.append("      push ebx\n")
@@ -586,7 +641,7 @@ def compile_program(program, outFilePath):
                     lt.append("      push ebx\n")
 
                 if op["value"] == Intrinsic.OVER2:
-                    lt.append("      ; -- duplicate --\n")
+                    lt.append("      ; -- over2 --\n")
                     lt.append("      pop  eax\n")
                     lt.append("      pop  ebx\n")
                     lt.append("      pop  ecx\n")
@@ -596,7 +651,7 @@ def compile_program(program, outFilePath):
                     lt.append("      push ecx\n")
 
                 if op["value"] == Intrinsic.SWAP:
-                    lt.append("      ; -- duplicate --\n")
+                    lt.append("      ; -- swap --\n")
                     lt.append("      pop  eax\n")
                     lt.append("      pop  ebx\n")
                     lt.append("      push eax\n")
@@ -616,7 +671,7 @@ def compile_program(program, outFilePath):
                     lt.append("      push ebx\n")
             
                 if op["value"] == Intrinsic.LOAD32:
-                    lt.append("      ;-- load (,) --\n")
+                    lt.append("      ;-- load32 --\n")
                     lt.append("      pop eax\n")
                     lt.append("      xor ebx, ebx\n")
                     lt.append("      mov ebx, [eax]\n")
@@ -630,7 +685,7 @@ def compile_program(program, outFilePath):
                     lt.append("      mov  byte ptr [ebx], al\n")
 
                 if op["value"] == Intrinsic.STORE32:
-                    lt.append("      ;-- store (.) --\n")
+                    lt.append("      ;-- store32 --\n")
                     lt.append("      pop  eax\n")
                     lt.append("      pop  ebx\n")
                     lt.append("      mov  [ebx], eax\n")
@@ -659,7 +714,7 @@ def compile_program(program, outFilePath):
                     lt.append("      push  ebx\n")
 
                 if op["value"] == Intrinsic.BAND:
-                    lt.append("      ;-- bor --\n")
+                    lt.append("      ;-- band --\n")
                     lt.append("      pop eax\n")
                     lt.append("      pop ebx\n")
                     lt.append("      and ebx, eax\n")

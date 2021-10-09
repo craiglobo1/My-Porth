@@ -14,55 +14,194 @@
     negativeSign db "-", 0    ; negativeSign     
     nl DWORD 10               ; new line character in ascii
     str_0 db 110, 101, 119, 102, 105, 108, 101, 50, 46, 116, 120, 116, 0 
-    str_1 db 104, 101, 108, 108, 111, 32, 119, 111, 114, 108, 100, 10, 0 
-    str_2 db 104, 101, 108, 108, 111, 32, 119, 111, 114, 108, 100, 10, 0 
+    str_1 db 99, 108, 101, 0 
 .data?
     mem db ?
 .code
     start PROC
 addr_0:
+     ; -- sysval NULL --
+      push NULL
+addr_1:
+     ; -- sysval FILE_ATTRIBUTE_NORMAL --
+      push FILE_ATTRIBUTE_NORMAL
+addr_2:
+     ; -- sysval OPEN_ALWAYS --
+      push OPEN_ALWAYS
+addr_3:
+     ; -- sysval NULL --
+      push NULL
+addr_4:
+     ; -- sysval FILE_SHARE_READ OR FILE_SHARE_WRITE --
+      push FILE_SHARE_READ OR FILE_SHARE_WRITE
+addr_5:
+     ; -- sysval GENERIC_READ OR GENERIC_WRITE --
+      push GENERIC_READ OR GENERIC_WRITE
+addr_6:
       lea edi, str_0
       push edi
-addr_1:
-     pop eax
-     invoke CreateFile , eax, GENERIC_READ OR GENERIC_WRITE, FILE_SHARE_READ OR FILE_SHARE_WRITE, NULL, OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL, NULL
-     push eax
-addr_2:
-      ; -- duplicate --
+addr_7:
+     ; -- syscall CreateFile --
+      call CreateFile
+      push eax
+addr_8:
+      ;-- mem --
+      lea edi, mem
+      push edi
+addr_9:
+      ; -- swap --
+      pop  eax
+      pop  ebx
+      push eax
+      push ebx
+addr_10:
+      ;-- store32 --
+      pop  eax
+      pop  ebx
+      mov  [ebx], eax
+addr_11:
+     ; -- sysval FILE_BEGIN --
+      push FILE_BEGIN
+addr_12:
+     ; -- push int 0 --
+      push 0
+addr_13:
+     ; -- push int 0 --
+      push 0
+addr_14:
+      ;-- mem --
+      lea edi, mem
+      push edi
+addr_15:
+      ;-- load32 --
       pop eax
+      xor ebx, ebx
+      mov ebx, [eax]
+      push ebx
+addr_16:
+     ; -- syscall SetFilePointer --
+      call SetFilePointer
       push eax
-      push eax
-addr_3:
-      ; -- duplicate --
+addr_17:
+      ;-- mem --
+      lea edi, mem
+      push edi
+addr_18:
+      ;-- load32 --
       pop eax
+      xor ebx, ebx
+      mov ebx, [eax]
+      push ebx
+addr_19:
+     ; -- syscall SetEndOfFile --
+      call SetEndOfFile
       push eax
-      push eax
-addr_4:
+addr_20:
+     ; -- push int 0 --
+      push 0
+addr_21:
+     ; -- push int 0 --
+      push 0
+addr_22:
       lea edi, str_1
       push edi
-addr_5:
-     ; -- push int 12 --
-      push 12
-addr_6:
-     pop ebx
-     pop edi
-     pop eax
-     invoke WriteFile, eax, edi, ebx, NULL, NULL
-addr_7:
-      lea edi, str_2
+addr_23:
+      ; -- duplicate (dup) --
+      pop eax
+      push eax
+      push eax
+addr_24:
+ ; -- while --
+addr_25:
+      ; -- duplicate (dup) --
+      pop eax
+      push eax
+      push eax
+addr_26:
+      ;-- load (,) --
+      pop eax
+      xor ebx, ebx
+      mov bl, [eax]
+      push ebx
+addr_27:
+     ; -- push int 0 --
+      push 0
+addr_28:
+     ; -- equal --
+      pop eax
+      pop ebx
+      cmp eax, ebx
+      je ZERO28
+      push 1
+      jmp END28
+      ZERO28:
+          push 0
+      END28:
+addr_29:
+ ; -- do --
+      pop eax
+      cmp eax, 1
+      jne addr_33
+addr_30:
+     ; -- push int 1 --
+      push 1
+addr_31:
+     ; -- add --
+      pop eax
+      pop ebx
+      add eax, ebx
+      push eax
+addr_32:
+      ;-- endwhile --
+      jmp addr_24
+addr_33:
+      ; -- over --
+      pop  eax
+      pop  ebx
+      push ebx
+      push eax
+      push ebx
+addr_34:
+     ; -- sub --
+      pop ebx
+      pop eax
+      sub eax, ebx
+      push eax
+addr_35:
+      ; -- swap --
+      pop  eax
+      pop  ebx
+      push eax
+      push ebx
+addr_36:
+      ;-- mem --
+      lea edi, mem
       push edi
-addr_8:
-     ; -- push int 12 --
-      push 12
-addr_9:
-     pop ebx
-     pop edi
-     pop eax
-     invoke WriteFile, eax, edi, ebx, NULL, NULL
-addr_10:
-     pop eax
-     invoke CloseHandle, eax
-addr_11:
+addr_37:
+      ;-- load32 --
+      pop eax
+      xor ebx, ebx
+      mov ebx, [eax]
+      push ebx
+addr_38:
+     ; -- syscall WriteFile --
+      call WriteFile
+      push eax
+addr_39:
+      ;-- mem --
+      lea edi, mem
+      push edi
+addr_40:
+      ;-- load32 --
+      pop eax
+      xor ebx, ebx
+      mov ebx, [eax]
+      push ebx
+addr_41:
+     ; -- syscall CloseHandle --
+      call CloseHandle
+      push eax
+addr_42:
      ; -- exit --
      invoke ExitProcess, 0
   start ENDP
