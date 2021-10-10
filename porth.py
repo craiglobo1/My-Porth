@@ -30,11 +30,11 @@ class Keyword(Enum):
 
 class Intrinsic(Enum):
     # win32 api operations
-    PRINT = auto()
-    FOPEN = auto()
-    FWRITE = auto()
-    FREAD = auto()
-    FCLOSE = auto()
+    STDOUT = auto()
+    # FOPEN = auto()
+    # FWRITE = auto()
+    # FREAD = auto()
+    # FCLOSE = auto()
     EXIT = auto()
     # arithmetic operations
     ADD = auto()
@@ -94,14 +94,10 @@ KEYWORD_NAMES = {
 "end"   :   Keyword.END,
 }
 
-assert len(Intrinsic) == 30 , f"Exhaustive handling in INTRINSIC_WORDS {len(Intrinsic)}"
+assert len(Intrinsic) == 26 , f"Exhaustive handling in INTRINSIC_WORDS {len(Intrinsic)}"
 INTRINSIC_WORDS = {
-"print" : Intrinsic.PRINT,
+"stdout" : Intrinsic.STDOUT,
 "exit"  : Intrinsic.EXIT,
-"fopen" : Intrinsic.FOPEN,
-"fwrite" : Intrinsic.FWRITE,
-"fread" : Intrinsic.FREAD,
-"fclose" : Intrinsic.FCLOSE,
 "+"     : Intrinsic.ADD,
 "-"     : Intrinsic.SUB,
 "divmod": Intrinsic.DIVMOD,
@@ -437,6 +433,7 @@ def compile_program(program, outFilePath):
             if op["type"] == OP.PUSH_STR:
                 valToPush = op["value"]
                 lt.append(f"      lea edi, str_{len(strs)}\n")
+                lt.append(f"      push {len(valToPush)}\n")
                 lt.append(f"      push edi\n")
                 strs.append(valToPush)
                 # assert False, "Not Implemented yet"
@@ -490,38 +487,38 @@ def compile_program(program, outFilePath):
                 else:
                     lt.append(f"      ;-- end --\n")
 
-            assert len(Intrinsic) == 30, f"Exaustive handling of Intrinsic's in Compiling {len(Intrinsic)}"
+            assert len(Intrinsic) == 26, f"Exaustive handling of Intrinsic's in Compiling {len(Intrinsic)}"
             if op["type"] == OP.INTRINSIC:
 
-                if op["value"] == Intrinsic.PRINT:
+                if op["value"] == Intrinsic.STDOUT:
                     lt.append("      ;-- print --\n")
                     lt.append("      pop eax\n")
                     lt.append("      invoke StdOut, addr [eax]\n")
                 
-                if op["value"] == Intrinsic.FOPEN:
-                    lt.append("      ;-- fopen --\n")
-                    lt.append("     pop eax\n")
-                    lt.append("     invoke CreateFile , eax, GENERIC_READ OR GENERIC_WRITE, FILE_SHARE_READ OR FILE_SHARE_WRITE, NULL, OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL, NULL\n")
-                    lt.append("     push eax\n")
-                
-                if op["value"] == Intrinsic.FWRITE:
-                    lt.append("      ;-- fwrite --\n")
-                    lt.append("     pop ebx\n")
-                    lt.append("     pop edi\n")
-                    lt.append("     pop eax\n")
-                    lt.append("     invoke WriteFile, eax, edi, ebx, NULL, NULL\n")
-                
-                if op["value"] == Intrinsic.FREAD:
-                    lt.append("      ;-- fread --\n")
-                    lt.append("     pop ebx\n")
-                    lt.append("     pop edi\n")
-                    lt.append("     pop eax\n")
-                    lt.append("     invoke ReadFile, eax, edi, ebx, NULL, NULL\n")
-
-                if op["value"] == Intrinsic.FCLOSE:
-                    lt.append("      ;-- fclose --\n")
-                    lt.append("     pop eax\n")
-                    lt.append("     invoke CloseHandle, eax\n")
+                # if op["value"] == Intrinsic.FOPEN:
+                    # lt.append("      ;-- fopen --\n")
+                    # lt.append("     pop eax\n")
+                    # lt.append("     invoke CreateFile , eax, GENERIC_READ OR GENERIC_WRITE, FILE_SHARE_READ OR FILE_SHARE_WRITE, NULL, OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL, NULL\n")
+                    # lt.append("     push eax\n")
+                # 
+                # if op["value"] == Intrinsic.FWRITE:
+                    # lt.append("      ;-- fwrite --\n")
+                    # lt.append("     pop ebx\n")
+                    # lt.append("     pop edi\n")
+                    # lt.append("     pop eax\n")
+                    # lt.append("     invoke WriteFile, eax, edi, ebx, NULL, NULL\n")
+                # 
+                # if op["value"] == Intrinsic.FREAD:
+                    # lt.append("      ;-- fread --\n")
+                    # lt.append("     pop ebx\n")
+                    # lt.append("     pop edi\n")
+                    # lt.append("     pop eax\n")
+                    # lt.append("     invoke ReadFile, eax, edi, ebx, NULL, NULL\n")
+# 
+                # if op["value"] == Intrinsic.FCLOSE:
+                    # lt.append("      ;-- fclose --\n")
+                    # lt.append("     pop eax\n")
+                    # lt.append("     invoke CloseHandle, eax\n")
 
                 if op["value"] == Intrinsic.EXIT:
                     lt.append("     ; -- exit --\n")
@@ -729,7 +726,7 @@ def compile_program(program, outFilePath):
             sAsNum = ", ".join(map(str,list(bytes(s,"utf-8"))))
             wf.write(f"    str_{i} db {sAsNum}, 0 \n")
         wf.write(".data?\n")
-        wf.write("    mem db ?\n")
+        wf.write("    mem db 100000 dup(?)\n")
         wf.write(".code\n")
         wf.write("    start PROC\n")
 
@@ -762,6 +759,7 @@ def simulate_program(program):
                 mem[strPtr:strPtr+n] = bs
                 strPtr += n
                 assert strPtr <= STR_CAPACITY+MEM_CAPACITY, "String Buffer Overflow"
+            stack.append(len(op["value"]))
             stack.append(op["addr"])
             i += 1
 
@@ -922,7 +920,7 @@ def simulate_program(program):
                 mem[store_addr32 + 3] = (store_value>>24) & 0xff
                 i += 1
 
-            elif op["value"] == Intrinsic.PRINT:
+            elif op["value"] == Intrinsic.STDOUT:
                 addr = stack.pop()
                 addrStr = addr
                 while mem[addr] != 0:

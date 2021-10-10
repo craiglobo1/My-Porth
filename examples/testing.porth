@@ -1,13 +1,11 @@
-include "string.porth"
+include "std.porth"
 
 macro fh mem end
 macro buffer mem 4 + end
-sysval "NULL" sysval "FILE_ATTRIBUTE_NORMAL" sysval "OPEN_ALWAYS" sysval "NULL" sysval "FILE_SHARE_READ OR FILE_SHARE_WRITE" sysval "GENERIC_READ OR GENERIC_WRITE" "newfile2.txt" syscall "CreateFile"
-// "newfile2.txt" fopen
+
+
+"craig3.txt" fopen
 fh swap store32
-
-sysval "FILE_BEGIN" 0 0 fh load32 syscall "SetFilePointer"
-fh load32 syscall "SetEndOfFile"
-
-0 0 "hey clyde" strlen swap fh load32 syscall "WriteFile"
-fh load32 syscall "CloseHandle"
+0 sysval "FILE_END" fh load32 setFp
+"wassup" fh load32 fwrite
+fh load32 fclose

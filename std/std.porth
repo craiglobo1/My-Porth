@@ -1,5 +1,74 @@
+macro maxMem 1000 end
+
 macro / divmod drop end
 macro % divmod swap drop end
 
 macro div divmod drop end
 macro mod divmod swap drop end
+
+macro print swap drop stdout end
+
+macro .32 store32 end
+macro ,32 load32 end
+
+// param: fileName
+macro fopen
+    swap drop
+    sysval "NULL" swap
+    sysval "FILE_ATTRIBUTE_NORMAL" swap
+    sysval "OPEN_ALWAYS" swap 
+    sysval "NULL" swap 
+    sysval "FILE_SHARE_READ OR FILE_SHARE_WRITE" swap
+    sysval "GENERIC_READ OR GENERIC_WRITE" swap
+    syscall "CreateFile"
+end
+
+// param: strlen, strToWrite, fileHandle
+macro fwrite
+    mem maxMem + swap store32 //fh
+    mem maxMem 4 + + swap store32 //str
+    mem maxMem 8 + + swap store32 //len
+    0
+    0
+    mem maxMem 8 + + load32 //len
+    mem maxMem 4 + + load32 //str
+    mem maxMem + load32 //fh
+    syscall "WriteFile" drop
+end
+
+// param: amtToRead, buffer, fileHandle
+macro fread
+    mem maxMem + swap store32 //fh
+    mem maxMem 4 + + swap store32 //buffer
+    mem maxMem 8 + + swap store32 //len of read
+    0
+    0
+    mem maxMem 8 + + load32 //len of read
+    mem maxMem 4 + + load32 //buffer
+    mem maxMem + load32 //fh
+    syscall "ReadFile" drop
+end
+
+// no param
+macro truncate
+    sysval "FILE_BEGIN" 0 0 fh load32 syscall "SetFilePointer" drop
+    fh load32 syscall "SetEndOfFile" drop
+end
+
+// param: fileHandle
+macro fclose
+    syscall "CloseHandle" drop
+end
+
+
+macro setFp
+    mem maxMem + swap store32 //fh
+    mem maxMem 4 + + swap store32 //move method
+    mem maxMem 8 + + swap store32 //amtToMove method
+    mem maxMem 4 + + load32 //move method
+    0
+    mem maxMem 8 + + load32 //amtToMove method
+    mem maxMem + load32 //fh
+    syscall "SetFilePointer"
+end
+
