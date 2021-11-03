@@ -1,3 +1,5 @@
+include "std.porth"
+
 // mem 1  + 1 .
 macro BOARD_SIZE 100 end
 
@@ -11,14 +13,14 @@ mem BOARD_SIZE 2 - + 1 .
         else
             mem BOARD_SIZE + dup ' ' .
         end
-        print
+        stdout
         1 +
     end
     drop
     mem BOARD_SIZE + dup 10 .
-    print
+    stdout
     mem     , 1 shl 
-    mem 1 + , 
+    mem 1 + ,
     bor
     1 while dup BOARD_SIZE 2 - < do
         swap 1 shl 7 band

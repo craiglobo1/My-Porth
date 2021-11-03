@@ -1,5 +1,5 @@
 import sys
-from enum import Enum,auto
+from enum import Enum,auto,IntEnum
 import subprocess
 from os import path, getcwd
 from collections import deque
@@ -82,47 +82,49 @@ class OP(Enum):
     INTRINSIC = auto()
 
 assert len(Keyword) == 9, f"Exhaustive handling in KEYWORD NAMES {len(Keyword)}"
-KEYWORD_NAMES = {
-"if"    :   Keyword.IF,
-"else"  :   Keyword.ELSE,
-"while" :   Keyword.WHILE,
-"do"    :   Keyword.DO,
-"macro" :   Keyword.MACRO,
-"include":  Keyword.INCLUDE,
-"syscall":  Keyword.SYSCALL,
-"sysval":  Keyword.SYSVAL,
-"end"   :   Keyword.END,
-}
+if True: #KEYWORD_NAMES
+    KEYWORD_NAMES = {
+    "if"    :   Keyword.IF,
+    "else"  :   Keyword.ELSE,
+    "while" :   Keyword.WHILE,
+    "do"    :   Keyword.DO,
+    "macro" :   Keyword.MACRO,
+    "include":  Keyword.INCLUDE,
+    "syscall":  Keyword.SYSCALL,
+    "sysval":  Keyword.SYSVAL,
+    "end"   :   Keyword.END,
+    }
 
 assert len(Intrinsic) == 26 , f"Exhaustive handling in INTRINSIC_WORDS {len(Intrinsic)}"
-INTRINSIC_WORDS = {
-"stdout" : Intrinsic.STDOUT,
-"exit"  : Intrinsic.EXIT,
-"+"     : Intrinsic.ADD,
-"-"     : Intrinsic.SUB,
-"divmod": Intrinsic.DIVMOD,
-"*"     : Intrinsic.MUL,
-"dump"  : Intrinsic.DUMP,
-"="     : Intrinsic.EQUAL,
-"!="    : Intrinsic.NE,
-">"     : Intrinsic.GT,
-"<"     : Intrinsic.LT,
-"drop"  : Intrinsic.DROP,
-"dup"   : Intrinsic.DUP,
-"2dup"  : Intrinsic.DUP2,
-"swap"  : Intrinsic.SWAP,
-"over"  : Intrinsic.OVER,
-"2over" : Intrinsic.OVER2,
-"mem"   : Intrinsic.MEM,
-"."     : Intrinsic.STORE,
-","     : Intrinsic.LOAD,
-"store32":Intrinsic.STORE32,
-"load32": Intrinsic.LOAD32,
-"shl"   : Intrinsic.SHL,
-"shr"   : Intrinsic.SHR,
-"bor"   : Intrinsic.BOR,
-"band"  : Intrinsic.BAND
-}
+if True: #INTRINSIC_WORDS
+    INTRINSIC_WORDS = {
+    "stdout" : Intrinsic.STDOUT,
+    "exit"  : Intrinsic.EXIT,
+    "+"     : Intrinsic.ADD,
+    "-"     : Intrinsic.SUB,
+    "divmod": Intrinsic.DIVMOD,
+    "*"     : Intrinsic.MUL,
+    "dump"  : Intrinsic.DUMP,
+    "="     : Intrinsic.EQUAL,
+    "!="    : Intrinsic.NE,
+    ">"     : Intrinsic.GT,
+    "<"     : Intrinsic.LT,
+    "drop"  : Intrinsic.DROP,
+    "dup"   : Intrinsic.DUP,
+    "2dup"  : Intrinsic.DUP2,
+    "swap"  : Intrinsic.SWAP,
+    "over"  : Intrinsic.OVER,
+    "2over" : Intrinsic.OVER2,
+    "mem"   : Intrinsic.MEM,
+    "."     : Intrinsic.STORE,
+    ","     : Intrinsic.LOAD,
+    "store32":Intrinsic.STORE32,
+    "load32": Intrinsic.LOAD32,
+    "shl"   : Intrinsic.SHL,
+    "shr"   : Intrinsic.SHR,
+    "bor"   : Intrinsic.BOR,
+    "band"  : Intrinsic.BAND
+    }
 
 
 
@@ -210,6 +212,7 @@ def compile_tokens_to_program(tokens,includePaths=[]):
                 op["loc"] = token["loc"]
                 program.append(op)
                 ip += 1
+
             elif token["value"] in macros:
                 mtk =  map(expandMacro, reversed(macros[token["value"]]["tokens"]))
                 mtk = list(mtk)
@@ -224,6 +227,7 @@ def compile_tokens_to_program(tokens,includePaths=[]):
                         sys.exit("%s:%d:%d: error: macro exansion limit of %d exceeded" %  (token["loc"] + (EXPANSION_LIMIT, )))
                     continue
             else:
+                print([val for val in macros])
                 sys.exit("%s:%d:%d: unknown word `%s`" % (token["loc"] + (token["value"], )))
             
 
@@ -494,31 +498,6 @@ def compile_program(program, outFilePath):
                     lt.append("      ;-- print --\n")
                     lt.append("      pop eax\n")
                     lt.append("      invoke StdOut, addr [eax]\n")
-                
-                # if op["value"] == Intrinsic.FOPEN:
-                    # lt.append("      ;-- fopen --\n")
-                    # lt.append("     pop eax\n")
-                    # lt.append("     invoke CreateFile , eax, GENERIC_READ OR GENERIC_WRITE, FILE_SHARE_READ OR FILE_SHARE_WRITE, NULL, OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL, NULL\n")
-                    # lt.append("     push eax\n")
-                # 
-                # if op["value"] == Intrinsic.FWRITE:
-                    # lt.append("      ;-- fwrite --\n")
-                    # lt.append("     pop ebx\n")
-                    # lt.append("     pop edi\n")
-                    # lt.append("     pop eax\n")
-                    # lt.append("     invoke WriteFile, eax, edi, ebx, NULL, NULL\n")
-                # 
-                # if op["value"] == Intrinsic.FREAD:
-                    # lt.append("      ;-- fread --\n")
-                    # lt.append("     pop ebx\n")
-                    # lt.append("     pop edi\n")
-                    # lt.append("     pop eax\n")
-                    # lt.append("     invoke ReadFile, eax, edi, ebx, NULL, NULL\n")
-# 
-                # if op["value"] == Intrinsic.FCLOSE:
-                    # lt.append("      ;-- fclose --\n")
-                    # lt.append("     pop eax\n")
-                    # lt.append("     invoke CloseHandle, eax\n")
 
                 if op["value"] == Intrinsic.EXIT:
                     lt.append("     ; -- exit --\n")
@@ -736,17 +715,46 @@ def compile_program(program, outFilePath):
         wf.write(text)
 
 
+
+class SV(IntEnum):
+    FILE_ATTRIBUTE_NORMAL= auto()
+    OPEN_ALWAYS = auto()
+    FILE_SHARE_READ_OR_FILE_SHARE_WRITE = auto()
+    GENERIC_READ_OR_GENERIC_WRITE = auto()
+    FILE_BEGIN = auto()
+    FILE_END = auto()
+    FILE_CUR = auto()
+
+assert len(SV) == 7, f"Exaustive handling of SV in sysvalues"
+sysvalues = {
+    "FILE_ATTRIBUTE_NORMAL" : SV.FILE_ATTRIBUTE_NORMAL,
+    "OPEN_ALWAYS" : SV.OPEN_ALWAYS,
+    "FILE_SHARE_READ OR FILE_SHARE_WRITE" : SV.FILE_SHARE_READ_OR_FILE_SHARE_WRITE,
+    "GENERIC_READ OR GENERIC_WRITE" : SV.GENERIC_READ_OR_GENERIC_WRITE,
+    "FILE_BEGIN" : SV.FILE_BEGIN,
+    "FILE_END" : SV.FILE_END,
+    "FILE_CUR" : SV.FILE_CUR
+}
+
+def getStrFromAddr(addr, lst):
+    string = ""
+    while lst[addr] != 0:
+        string += chr(lst[addr])
+        addr += 1
+    return string
+
 MEM_CAPACITY = 690_000
 STR_CAPACITY = 690_000
 def simulate_program(program):
     stack = []
+    handles = []
     mem = bytearray(MEM_CAPACITY + STR_CAPACITY)
     strPtr = STR_CAPACITY
     i = 0
     while i < len(program):
         op = program[i]
 
-        assert len(OP) == 8, f"Exhaustive handling of operations whilst simulating {len(OP)}"
+        assert len(OP) == 10, f"Exhaustive handling of operations whilst simulating {len(OP)}"
         if op["type"] == OP.PUSH_INT:
             stack.append(op["value"])
             i += 1
@@ -761,6 +769,76 @@ def simulate_program(program):
                 assert strPtr <= STR_CAPACITY+MEM_CAPACITY, "String Buffer Overflow"
             stack.append(len(op["value"]))
             stack.append(op["addr"])
+            i += 1
+
+        elif op["type"] == OP.SYSCALL:
+            if op["value"] == "CreateFile":
+                fileNameIdx = stack.pop()
+                stack = stack[:-6]
+                fileName = getStrFromAddr(fileNameIdx, mem)
+
+                handles.append(open(fileName, "r+"))
+                stack.append(len(handles)-1)
+
+            elif op["value"] == "WriteFile":
+                handleIdx = stack.pop()
+                stringIdx = stack.pop()
+                stack = stack[:-3]
+                handle = handles[handleIdx]
+                string = getStrFromAddr(stringIdx, mem)
+                handle.write(string)
+                stack.append(1)
+            
+            elif op["value"] == "ReadFile":
+                handleIdx = stack.pop()
+                store_addr32 = stack.pop()
+                amtToRead = stack.pop()
+                stack = stack[:-2]
+                if handleIdx >= len(handles):
+                    sys.exit("%s:%d:%d ERROR: handles index %s is out" % op["loc"] + (handleIdx,))
+                handle = handles[handleIdx]
+                
+                store_value = handle.read(amtToRead)
+                for j in range(amtToRead):
+                    mem[store_addr32 + j] = ord(store_value[j])
+                stack.append(1)
+
+            elif op["value"] == "CloseHandle":
+                handleIdx = stack.pop()
+                handles[handleIdx].close()
+                stack.append(1)
+            elif op["value"] == "SetFilePointer":
+                handleIdx = stack.pop()
+                amtToMove = stack.pop()
+                stack.pop()
+                moveMethod = stack.pop()
+                if moveMethod == SV.FILE_BEGIN:
+                    whence = 0
+                elif moveMethod == SV.FILE_CUR:
+                    whence = 1
+                elif moveMethod == SV.FILE_END:
+                    whence = 2
+                else:
+                    sys.exit("%s:%d:%d ERROR: invalid move method %s in SetFilePointer" % op["loc"] + (moveMethod,))
+                
+                handle = handles[handleIdx]
+                handle.seek(amtToMove, whence)
+                stack.append(1)
+            elif op["value"] == "SetEndOfFile":
+                handleIdx = stack.pop()
+                handle = handles[handleIdx]
+                handle.truncate()
+                stack.append(1)
+            else:
+                sys.exit("%s:%d:%d ERROR: syscall %s not found" % (op["loc"] + (op["value"],)))            
+            
+            i += 1
+        
+        elif op["type"] == OP.SYSVAL:
+            if op["value"] in sysvalues:
+                stack.append(int(sysvalues[op["value"]]))
+            else:
+                sys.exit("%s:%d:%d ERROR: sysvalue %s not found" % op["loc"] + (op["value"],))
             i += 1
 
         elif op["type"] == OP.IF:
@@ -953,9 +1031,10 @@ def simulate_program(program):
                 stack.append(a & b)
                 i += 1
         # if "value" in op: 
-            # print(op["type"],op["value"] , stack, mem[:31])
+        #     print(i,op["type"],op["value"] , stack, mem[:31])
+        #     print(mem[:31])
         # else:
-            # print(op["type"], stack, mem[:31])
+        #     print(i,op["type"], stack, mem[:31])
         # input()
 
 def usage(program_token):

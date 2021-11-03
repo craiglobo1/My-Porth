@@ -1,11 +1,12 @@
 include "std.porth"
 
 macro fh mem end
-macro buffer mem 4 + end
+macro buffer mem 100 + end
 
 
 "craig3.txt" fopen
 fh swap store32
-0 sysval "FILE_END" fh load32 setFp
-"wassup" fh load32 fwrite
+fh load32 truncate
+"cr" fh load32 fwrite
+// 20 buffer fh load32 fread
 fh load32 fclose

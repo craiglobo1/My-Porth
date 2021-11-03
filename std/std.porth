@@ -14,10 +14,10 @@ macro ,32 load32 end
 // param: fileName
 macro fopen
     swap drop
-    sysval "NULL" swap
+    0 swap
     sysval "FILE_ATTRIBUTE_NORMAL" swap
     sysval "OPEN_ALWAYS" swap 
-    sysval "NULL" swap 
+    0 swap 
     sysval "FILE_SHARE_READ OR FILE_SHARE_WRITE" swap
     sysval "GENERIC_READ OR GENERIC_WRITE" swap
     syscall "CreateFile"
@@ -49,10 +49,11 @@ macro fread
     syscall "ReadFile" drop
 end
 
-// no param
+// param: fileHandle
 macro truncate
-    sysval "FILE_BEGIN" 0 0 fh load32 syscall "SetFilePointer" drop
-    fh load32 syscall "SetEndOfFile" drop
+    mem maxMem + swap store32 //fh
+    sysval "FILE_BEGIN" 0 0 mem maxMem + load32 syscall "SetFilePointer" drop
+    mem maxMem + load32 syscall "SetEndOfFile" drop
 end
 
 // param: fileHandle
@@ -60,7 +61,7 @@ macro fclose
     syscall "CloseHandle" drop
 end
 
-
+// 
 macro setFp
     mem maxMem + swap store32 //fh
     mem maxMem 4 + + swap store32 //move method
