@@ -34,5 +34,5 @@ mem BOARD_SIZE 2 - + 1 .
 
     1 +
 end
-drop
+dump
 

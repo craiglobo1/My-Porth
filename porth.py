@@ -1,15 +1,16 @@
+from io import FileIO
 import sys
 from enum import Enum,auto,IntEnum
 import subprocess
 from os import path, getcwd
-from collections import deque
 import time
-from copy import copy
+from dataclasses import dataclass
+from typing import *
 
 
 EXPANSION_LIMIT = 1000
 
-class Token(Enum):
+class TokenType(Enum):
     INT = auto()
     WORD = auto()
     STR = auto()
@@ -23,9 +24,11 @@ class Keyword(Enum):
     WHILE = auto()
     DO = auto()
     MACRO = auto()
+    MEMORY = auto()
     INCLUDE = auto()
     SYSCALL = auto()
     SYSVAL = auto()
+    BREAK = auto()
     END = auto()
 
 class Intrinsic(Enum):
@@ -65,11 +68,13 @@ class Intrinsic(Enum):
     SHR = auto()
     BAND = auto()
     BOR = auto()
+    BXOR = auto()
 
-class OP(Enum):
+class OpType(Enum):
     # stack operations
     PUSH_INT = auto()
     PUSH_STR = auto()
+    PUSH_MEM = auto()
     # syscall
     SYSCALL = auto()
     SYSVAL = auto()
@@ -79,25 +84,26 @@ class OP(Enum):
     WHILE = auto()
     DO = auto()
     END = auto()
+    BREAK = auto()
     INTRINSIC = auto()
 
-assert len(Keyword) == 9, f"Exhaustive handling in KEYWORD NAMES {len(Keyword)}"
-if True: #KEYWORD_NAMES
-    KEYWORD_NAMES = {
+assert len(Keyword) == 11, f"Exhaustive handling in KEYWORD NAMES {len(Keyword)}"
+KEYWORD_NAMES = {
     "if"    :   Keyword.IF,
     "else"  :   Keyword.ELSE,
     "while" :   Keyword.WHILE,
     "do"    :   Keyword.DO,
     "macro" :   Keyword.MACRO,
+    "memory" : Keyword.MEMORY,
     "include":  Keyword.INCLUDE,
     "syscall":  Keyword.SYSCALL,
     "sysval":  Keyword.SYSVAL,
+    "break":  Keyword.BREAK,
     "end"   :   Keyword.END,
-    }
+}
 
-assert len(Intrinsic) == 26 , f"Exhaustive handling in INTRINSIC_WORDS {len(Intrinsic)}"
-if True: #INTRINSIC_WORDS
-    INTRINSIC_WORDS = {
+assert len(Intrinsic) == 27 , f"Exhaustive handling in INTRINSIC_WORDS {len(Intrinsic)}"
+INTRINSIC_WORDS = {
     "stdout" : Intrinsic.STDOUT,
     "exit"  : Intrinsic.EXIT,
     "+"     : Intrinsic.ADD,
@@ -116,269 +122,371 @@ if True: #INTRINSIC_WORDS
     "over"  : Intrinsic.OVER,
     "2over" : Intrinsic.OVER2,
     "mem"   : Intrinsic.MEM,
-    "."     : Intrinsic.STORE,
-    ","     : Intrinsic.LOAD,
+    "store8"     : Intrinsic.STORE,
+    "load8"     : Intrinsic.LOAD,
     "store32":Intrinsic.STORE32,
     "load32": Intrinsic.LOAD32,
     "shl"   : Intrinsic.SHL,
     "shr"   : Intrinsic.SHR,
     "bor"   : Intrinsic.BOR,
-    "band"  : Intrinsic.BAND
-    }
+    "band"  : Intrinsic.BAND,
+    "bxor"  : Intrinsic.BXOR
+}
+
+Loc=Tuple[str, int, int]
+
+assert len(TokenType) == 5, "Exhaustive Token type definition. The `value` field of the Token dataclass may require an update"
+@dataclass
+class Token:
+    type: TokenType
+    text: str
+    loc: Loc
+    value: Union[int, str, Keyword]
+    # https://www.python.org/dev/peps/pep-0484/#forward-references
+    expanded_from: Optional['Token'] = None
+    expanded: int = 0
+
+OpAddr=int
+MemAddr=int
+
+@dataclass
+class Op:
+    type: OpType
+    token: Token 
+    operand: Optional[Union[int, str, Intrinsic, OpAddr]] = None
+
+@dataclass
+class Program:
+    ops : List[Op]
+    memory_capacity : int = 0
 
 
-
-def find_col(line, start, predicate):
+def find_col(line : str, start : int, predicate : Callable[[str], bool]) -> int:
     while start < len(line) and predicate(line[start]):
         start += 1
     return start
 
-def lex_line(file_path, row, line):
-    col = find_col(line, 0, lambda x: x.isspace())
-    assert len(Token) == 5, "Exahuastive handling of tokens in lex_line"
-    while col < len(line):
-        loc = (file_path, row + 1, col + 1)
+def unescape_string(s: str) -> str:
+    # NOTE: unicode_escape assumes latin-1 encoding, so we kinda have
+    # to do this weird round trip
+    return s.encode('utf-8').decode('unicode_escape').encode('latin-1').decode('utf-8')
 
-        if line[col] == '"':
-            col_end = find_col(line, col+1, lambda x: not x == '"')
-            if col_end >= len(line) or line[col_end] != '"':
-                print("%s:%d:%d error: string literal not closed" % loc )
-            wordOfToken = line[col+1:col_end]
-            yield (col, (Token.STR, bytes(wordOfToken, "utf-8").decode("unicode-escape")))
-            col = find_col(line, col_end+1, lambda x: x.isspace())
+def lex_lines(file_path : str, lines : List[str]) -> Generator[Token, None, None]:
 
-        elif line[col] == "'":
-            col_end = find_col(line, col+1, lambda x: not x == "'")
-            if col_end >= len(line) or line[col_end] != "'":
-                print("%s:%d:%d error: string literal not closed" % loc )
-            wordOfToken = line[col+1:col_end]
-            yield (col, (Token.CHAR, bytes(wordOfToken, "utf-8").decode("unicode-escape")))
-            col = find_col(line, col_end+1, lambda x: x.isspace())
+    for row, line in enumerate(lines):
+        col = find_col(line, 0, lambda x: x.isspace())
+        assert len(TokenType) == 5, "Exahuastive handling of tokens in lex_lines"
+        comment = False
+        while col < len(line) and not comment:
+            loc = (file_path, row + 1, col + 1)
 
-        else:
-            col_end = find_col(line, col, lambda x: not x.isspace())
-            wordOfToken = line[col:col_end]
-            try:
-                yield (col,(Token.INT, int(wordOfToken)))
-            except:
-                if wordOfToken in KEYWORD_NAMES:
-                    yield (col, (Token.KEYWORD, KEYWORD_NAMES[wordOfToken]))
-                else:
-                    yield (col,(Token.WORD, wordOfToken))
-            col = find_col(line, col_end, lambda x: x.isspace())
+            if line[col] == '"':
+                col_end = find_col(line, col+1, lambda x: not x == '"')
+                if col_end >= len(line) or line[col_end] != '"':
+                    print("%s:%d:%d error: string literal not closed" % loc )
+                text_of_token = line[col+1:col_end]
+                yield Token(TokenType.STR, text_of_token, loc, unescape_string(text_of_token))
+                col = find_col(line, col_end+1, lambda x: x.isspace())
+
+            elif line[col] == "'":
+                col_end = find_col(line, col+1, lambda x: not x == "'")
+                if col_end >= len(line) or line[col_end] != "'":
+                    print("%s:%d:%d error: string literal not closed" % loc )
+                text_of_token = line[col+1:col_end]
+                char = unescape_string(text_of_token)
+                if len(char) != 1:
+                    sys.exit("%s:%d:%d only a single byte is allowed inside of a character literal" % loc)
+                yield Token(TokenType.CHAR, text_of_token, loc, ord(char))
+                col = find_col(line, col_end+1, lambda x: x.isspace())
+
+            else:
+                col_end = find_col(line, col, lambda x: not x.isspace())
+                text_of_token = line[col:col_end]
+                try:
+                    yield Token(TokenType.INT, text_of_token, loc, int(text_of_token))
+                except ValueError:
+                    if text_of_token in KEYWORD_NAMES:
+                        yield Token(TokenType.KEYWORD, text_of_token, loc, KEYWORD_NAMES[text_of_token])
+                    else:
+                        comment = text_of_token.startswith('//')
+                        if not comment:
+                            yield Token(TokenType.WORD, text_of_token, loc, text_of_token)
+                col = find_col(line, col_end, lambda x: x.isspace())
 
 """
 Token is a dict with the follwing possible fields
-- `type` -- The type of the OP. One of Token.INT, Token.WORD etc
+- `type` -- The type of the OpType One of TokenType.INT, TokenType.WORD etc
 - `loc` -- location of the OP in the program it contains (`file_token`,  `row`, `col`)
-- `value` -- the value of the token depending on the type of the Token. For `str` it's Token.WORD and For `int` it's Token.INT
-- `expanded` -- the counter for the number of tokens expanded from OP.MACRO and OP.INCLUDE
+- `value` -- the value of the token depending on the type of the TokenType. For `str` it's TokenType.WORD and For `int` it's TokenType.INT
+- `expanded` -- the counter for the number of tokens expanded from OpType.MACRO and OpType.INCLUDE
 """
 
 
-def lex_file(file_path):
+def lex_file(file_path : str) -> List[Token]:
     with open(file_path, "r") as f:
-        return [{"type": token, "loc": (file_path, row+1, col+1), "value" : tokenVal} 
-                for (row, line) in enumerate(f.readlines())
-                for (col, (token, tokenVal)) in lex_line(file_path, row, line.split('//')[0],)]
+        ans = [token for token in lex_lines(file_path, f.readlines())]
+        return ans
 
-def expandMacro(token):
-    if "expanded" not in token:
-        token["expanded"] = 0
-    token["expanded"] += 1
+def expandMacro(token : Token) -> Token:
+    token.expanded += 1
     return token
 
 """
 Macro is a Dictionary
 "macrotoken" -> (loc, tokens)
 """
-def compile_tokens_to_program(tokens,includePaths=[]):
+@dataclass
+class Macro:
+    loc: Loc
+    tokens: List[Token]
+
+def evaluate_constant_from_tokens(rtokens : List[Token]) -> int:
+    stack : List[int] = []
+    while len(rtokens) > 0:
+        token = rtokens.pop()
+        if token.type == TokenType.KEYWORD:
+            if token.value == Keyword.END:
+                break
+            else:
+                sys.exit("%s:%d:%d unsupported keyword `%s` in constant evaluation" % (token.loc + (token.text,)))
+        elif token.type == TokenType.INT:
+            assert isinstance(token.value, int)
+            stack.append(token.value)
+        elif token.type == TokenType.WORD:
+            if token.value == Intrinsic.ADD:
+                a = stack.pop()
+                b = stack.pop()
+                stack.append(a + b)
+            elif token.value == Intrinsic.MUL:
+                a = stack.pop()
+                b = stack.pop()
+                stack.append(a*b)
+            else:
+                sys.exit("%s:%d:%d unsupported word `%s` in constant evaluation" % (token.loc + (token.text,)))
+        else:
+            sys.exit("%s:%d:%d unsupported token `%s` in constant evaluation" % (token.loc + (token.text,)))
+
+    if len(stack) != 1:
+        sys.exit("%s:%d:%d memory definition expects one int" % token.loc)
+    return stack.pop()
+
+def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[]) -> Program:
     human = lambda x: str(x).split(".")[-1].lower()
-    stack = []
-    program = []
-    rtokens = list(reversed(tokens))
-    macros = {}
-    ip = 0;
+    stack : List[OpAddr] = []
+    program: Program = Program(ops=[], memory_capacity=0)
+    rtokens : List[Token] = list(reversed(tokens))
+    macros: Dict[str, Macro] = {}
+    memories : Dict[str, MemAddr] = {}
+    ip : OpAddr = 0
     while len(rtokens) > 0:
         # TODO: some sort of safety mechanism for recursive macros
-        token = rtokens.pop()
-        op = {}
-        assert len(Token) == 5, "Exhaustive token handling in compile_tokens_to_program"
-        if token["type"] == Token.WORD:
-            assert isinstance(token["value"], str), "This could be a bug in the lexer"
-            if token["value"] in INTRINSIC_WORDS:
-                op["type"]= OP.INTRINSIC
-                op["value"]= INTRINSIC_WORDS[token["value"]]
-                op["loc"] = token["loc"]
-                program.append(op)
+        token : Token = rtokens.pop()
+
+        assert len(TokenType) == 5, "Exhaustive token handling in compile_tokens_to_program"
+        if token.type == TokenType.WORD:
+            assert isinstance(token.value, str), "This could be a bug in the lexer"
+            if token.value in INTRINSIC_WORDS:
+                op = Op(OpType.INTRINSIC, token, INTRINSIC_WORDS[token.value])
+                program.ops.append(op)
                 ip += 1
 
-            elif token["value"] in macros:
-                mtk =  map(expandMacro, reversed(macros[token["value"]]["tokens"]))
-                mtk = list(mtk)
+            elif token.value in macros:
+                mtkGen =  map(expandMacro, reversed(macros[token.value].tokens))
+                mtk = list(mtkGen)
 
                 if len(list(mtk)) == 0:
-                    sys.exit("%s:%d:%d: error: macro is empty" %  token["loc"])
+                    sys.exit("%s:%d:%d: error: macro is empty" %  token.loc)
 
                 if len(list(mtk)) != 0:
                     rtokens += mtk
 
-                    if EXPANSION_LIMIT < rtokens[-1]["expanded"]:
-                        sys.exit("%s:%d:%d: error: macro exansion limit of %d exceeded" %  (token["loc"] + (EXPANSION_LIMIT, )))
+                    if EXPANSION_LIMIT < rtokens[-1].expanded:
+                        sys.exit("%s:%d:%d: error: macro exansion limit of %d exceeded" %  (token.loc + (EXPANSION_LIMIT, )))
                     continue
+            
+            elif token.value in memories:
+                op = Op(OpType.PUSH_MEM, token, memories[token.value])
+                program.ops.append(op)
+                ip += 1
             else:
-                print([val for val in macros])
-                sys.exit("%s:%d:%d: unknown word `%s`" % (token["loc"] + (token["value"], )))
+                print(memories,[ tok.text for tok in rtokens])
+                sys.exit("%s:%d:%d: unknown word `%s`" % (token.loc + (token.text, )))
             
 
-        elif token["type"] == Token.INT:
-            op["type"]= OP.PUSH_INT
-            op["value"] = token["value"]
-            op["loc"] = token["loc"]
-            program.append(op)
+        elif token.type == TokenType.INT:
+            assert isinstance(token.value, int), "This could be a bug in the lexer"
+            op = Op(OpType.PUSH_INT, token, token.value)
+            program.ops.append(op)
             ip += 1
 
-        elif token["type"] == Token.STR:
-            op["type"]= OP.PUSH_STR
-            op["value"] = token["value"]
-            op["loc"] = token["loc"]
-            program.append(op)
+        elif token.type == TokenType.STR:
+            assert isinstance(token.value, str), "This could be a bug in the lexer"
+            op = Op(OpType.PUSH_STR , token, token.value)
+            program.ops.append(op)
             ip += 1
 
-        elif token["type"] == Token.CHAR:
-            op["type"]= OP.PUSH_INT
-            op["value"] = ord(token["value"])
-            op["loc"] = token["loc"]
-            program.append(op)
+        elif token.type == TokenType.CHAR:
+            assert isinstance(token.value, int), "This could be a bug in the lexer"
+            op = Op(OpType.PUSH_INT, token, token.value)
+            program.ops.append(op)
             ip += 1
 
-        elif token["type"] == Token.KEYWORD:
-            assert len(Keyword) == 9, "Exhaustive ops handling in compile_tokens_to_program. Only ops that form blocks must be handled"
-            if token["value"] == Keyword.IF:
-                op["type"] = OP.IF
-                op["loc"] = token["loc"]
-                program.append(op)
+        elif token.type == TokenType.KEYWORD:
+            assert len(Keyword) == 11, "Exhaustive ops handling in compile_tokens_to_program. Only ops that form blocks must be handled"
+            if token.value == Keyword.IF:
+                op = Op(OpType.IF, token)
+                program.ops.append(op)
                 stack.append(ip)
                 ip += 1
 
-            elif token["value"] == Keyword.ELSE:
-                op["type"] = OP.ELSE
-                op["loc"] = token["loc"]
-                program.append(op)
+            elif token.value == Keyword.ELSE:
+                op = Op(OpType.ELSE, token)
+                program.ops.append(op)
                 if_ip = stack.pop()
-                if program[if_ip]["type"] != OP.IF:
-                    sys.exit('%s:%d:%d: ERROR: `else` can only be used in `if`-blocks' % program[if_ip]["loc"])
-                program[if_ip]["jmp"] = ip + 1
+                if program.ops[if_ip].type != OpType.IF:
+                    sys.exit('%s:%d:%d: ERROR: `else` can only be used in `if`-blocks' % program.ops[if_ip].token.loc)
+                program.ops[if_ip].operand = ip + 1
                 stack.append(ip)
                 ip += 1
 
-            elif token["value"] == Keyword.END:
-                op["type"] = OP.END
-                op["loc"] = token["loc"]
-                program.append(op)
+            elif token.value == Keyword.END:
+                op = Op(OpType.END, token)
+                program.ops.append(op)
                 block_ip = stack.pop()
-                if program[block_ip]["type"] == OP.IF or program[block_ip]["type"] == OP.ELSE:
-                    program[block_ip]["jmp"] = ip
-                    program[ip]["jmp"] = ip + 1
-                elif program[block_ip]["type"] == OP.DO:
-                    assert program[block_ip]["jmp"] is not None
-                    program[ip]["jmp"] = program[block_ip]["jmp"]
-                    program[block_ip]["jmp"] = ip + 1
+                if program.ops[block_ip].type == OpType.IF or program.ops[block_ip].type == OpType.ELSE:
+                    program.ops[block_ip].operand = ip
+                    program.ops[ip].operand = ip + 1
+
+                elif program.ops[block_ip].type == OpType.DO:
+                    assert program.ops[block_ip].operand is not None
+                    program.ops[ip].operand = program.ops[block_ip].operand
+                    program.ops[block_ip].operand = ip + 1
                 else:
-                    sys.exit('%s:%d:%d: ERROR: `end` can only close `if`, `else` or `do` blocks for now' % program[block_ip]["loc"])
+                    print([op.token.text for op in program.ops])
+                    sys.exit('%s:%d:%d: ERROR: `end` can only close `if`, `else` or `do` blocks for now' % program.ops[block_ip].token.loc)
                 ip += 1
 
-            elif token["value"] == Keyword.WHILE:
-                op["type"] = OP.WHILE
-                op["loc"] = token["loc"]
-                program.append(op)
+            elif token.value == Keyword.WHILE:
+                op = Op(OpType.WHILE, token)
+                program.ops.append(op)
                 stack.append(ip)
                 ip += 1
 
-            elif token["value"] == Keyword.DO:
-                op["type"] = OP.DO
-                op["loc"] = token["loc"]
-                program.append(op)
+            elif token.value == Keyword.DO:
+                op = Op(OpType.DO, token)
+                program.ops.append(op)
                 while_ip = stack.pop()
-                program[ip]["jmp"] = while_ip
+                program.ops[ip].operand = while_ip
                 stack.append(ip)
                 ip += 1
-                
-            elif token["value"] == Keyword.SYSCALL:
+
+            #TODO: add show stack after break
+            elif token.value == Keyword.BREAK:
+                op = Op(OpType.BREAK, token)
+                program.ops.append(op)
+                ip += 1
+
+            elif token.value == Keyword.SYSCALL:
                 callName = rtokens.pop()
-                if callName["type"] != Token.STR:
-                    sys.exit("%s:%d:%d: ERROR: expected syscall name to be %s but found %s" % (token["loc"] + (human(Token.STR), human(token["type"]))))
+                if callName.type != TokenType.STR:
+                    sys.exit("%s:%d:%d: ERROR: expected syscall name to be %s but found %s" % (token.loc + (human(TokenType.STR), human(token.type))))
 
-                op["type"] = OP.SYSCALL
-                op["value"] = callName["value"]
-                op["loc"] = token["loc"]
-                program.append(op)
+                op = Op(OpType.SYSCALL, token)
+                program.ops.append(op)
                 ip += 1
 
-            elif token["value"] == Keyword.SYSVAL:
+            elif token.value == Keyword.SYSVAL:
                 sysval = rtokens.pop()
-                if sysval["type"] != Token.STR:
-                    sys.exit("%s:%d:%d: ERROR: expected syscall name to be %s but found %s" % (token["loc"] + (human(Token.STR), human(token["type"]))))
+                if sysval.type != TokenType.STR:
+                    sys.exit("%s:%d:%d: ERROR: expected sysval name to be %s but found %s" % (token.loc + (human(TokenType.STR), human(token.type))))
 
-                op["type"] = OP.SYSVAL
-                op["value"] = sysval["value"]
-                op["loc"] = token["loc"]
-                program.append(op)
+                op = Op(OpType.SYSVAL, token)
+                program.ops.append(op)
                 ip += 1
 
-            elif token["value"] == Keyword.INCLUDE:
+            elif token.value == Keyword.INCLUDE:
                 if len(rtokens) == 0:
-                    sys.exit("%s:%d:%d: ERROR: expected include path but found nothing" % op["loc"])
+                    sys.exit("%s:%d:%d: ERROR: expected include path but found nothing" % op.token.loc)
+
                 token = rtokens.pop()
-                if token["type"] != Token.STR:
-                    sys.exit("%s:%d:%d: ERROR: expected include path to be %s but found %s" % (token["loc"] + (human(Token.STR), human(token["type"]))))
+                if token.type != TokenType.STR:
+                    sys.exit("%s:%d:%d: ERROR: expected include path to be %s but found %s" % (token.loc + (human(TokenType.STR), human(token.type))))
 
                 fileIncluded = False
                 for p in includePaths:
                     try:
-                        rtokens += reversed(lex_file(path.join(p,token["value"])))
+                        assert isinstance(token.value, str)
+                        rtokens += reversed(lex_file(path.join(p, token.value)))
+                        # print([token.text for token in list(lex_file(path.join(p, token.value)))])
                         fileIncluded = True
                         break
                     except FileNotFoundError:
                         continue
                 
                 if not fileIncluded:
-                    print(includePaths,token["value"])
-                    sys.exit("%s:%d:%d: ERROR: `%s` file not found" % (token["loc"] + (token["value"],)))
+                    print(includePaths,token.value)
+                    sys.exit("%s:%d:%d: ERROR: `%s` file not found" % (token.loc + (token.value,)))
             
 
-                
-            # TODO: capability to define macros from command line
-            elif token["value"] == Keyword.MACRO:
+            elif token.value == Keyword.MEMORY:
                 if len(rtokens) == 0:
-                    sys.exit("%s:%d:%d: ERROR: expected macro name but found nothing" % token["loc"])
+                    sys.exit("%s:%d:%d: ERROR: expected memory name but found nothing" % token.loc)
+                
+                token = rtokens.pop()
+                if token.type != TokenType.WORD:
+                    sys.exit("%s:%d:%d: ERROR: expected memory name to be %s but found %s" % (token.loc + (human(TokenType.WORD), human(token.type))))
+                
+                memory_name = token.value
+                if memory_name in macros:
+                    assert isinstance(token.value, str)
+                    print("%s:%d:%d: ERROR: redefinition of already existing macro `%s`" % (token.loc + (token.value, )))
+                    sys.exit("%s:%d:%d: NOTE: the first definition is located here" % macros[token.value].loc)
+
+                if memory_name in INTRINSIC_WORDS:
+                    print("%s:%d:%d: ERROR: redefinition of a builtin word `%s`" % (token.loc + (token.value, )))
+
+                if memory_name in memories:
+                    sys.exit("%s:%d:%d: ERROR: redefinition of already existing memory `%s`" % (token.loc + (token.value, )))
+                    # sys.exit("%s:%d:%d: NOTE: the first definition is located here" % memories[token.value].loc)
+
+                mem_size = evaluate_constant_from_tokens(rtokens)
+                memories[memory_name] = program.memory_capacity
+                program.memory_capacity += mem_size
+
+            # TODO: capability to define macros from command line
+            elif token.value == Keyword.MACRO:
+                if len(rtokens) == 0:
+                    sys.exit("%s:%d:%d: ERROR: expected macro name but found nothing" % token.loc)
                 token = rtokens.pop()
 
-                if token["type"] != Token.WORD:
-                    sys.exit("%s:%d:%d: ERROR: expected macro name to be %s but found %s" % (token["loc"] + (human(Token.WORD), human(token["type"]))))
+                if token.type != TokenType.WORD:
+                    sys.exit("%s:%d:%d: ERROR: expected macro name to be %s but found %s" % (token.loc + (human(TokenType.WORD), human(token.type))))
 
-                assert isinstance(token["value"], str), "This is probably a bug in the lexer"
-                if token["value"] in macros:
-                    print("%s:%d:%d: ERROR: redefinition of already existing macro `%s`" % (token["loc"] + (token["value"], )))
-                    sys.exit("%s:%d:%d: NOTE: the first definition is located here" % macros[token["value"]]["loc"])
+                assert isinstance(token.value, str), "This is probably a bug in the lexer"
+                if token.value in macros:
+                    print("%s:%d:%d: ERROR: redefinition of already existing macro `%s`" % (token.loc + (token.value, )))
+                    sys.exit("%s:%d:%d: NOTE: the first definition is located here" % macros[token.value].loc)
 
-                if token["value"] in INTRINSIC_WORDS:
-                    print("%s:%d:%d: ERROR: redefinition of a builtin word `%s`" % (token["loc"] + (token["value"], )))
+                if token.value in INTRINSIC_WORDS:
+                    print("%s:%d:%d: ERROR: redefinition of a builtin word `%s`" % (token.loc + (token.value, )))
+                
+                if token.value in memories:
+                    sys.exit("%s:%d:%d: ERROR: redefinition of already existing memory `%s`" % (token.loc + (token.value, )))
 
-                macro = {"loc" : token["loc"], "tokens" : []}
-                macros[token["value"]] = macro
+                macro = Macro(token.loc, [])
+                macros[token.value] = macro
 
                 # TODO: support for nested blocks within the macro definition
                 nestAmt = 0
                 while len(rtokens) > 0:
                     token = rtokens.pop()
-                    assert len(Keyword) == 9, f"Exaustive handling of keywords with `end` in compile_tokens_to_program for end type starters like Keyword.IF, Keyword.DO {len(Keyword)}"
-                    if token["type"] == Token.KEYWORD and token["value"] in [Keyword.IF, Keyword.DO]:
+                    assert len(Keyword) == 11, f"Exaustive handling of keywords with `end` in compile_tokens_to_program for end type starters like Keyword.IF, Keyword.DO {len(Keyword)}"
+                    if token.type == TokenType.KEYWORD and token.value in [Keyword.IF, Keyword.DO]:
                         nestAmt += 1
 
-                    macro["tokens"].append(token)
+                    macro.tokens.append(token)
 
-                    if token["type"] == Token.KEYWORD and token["value"] == Keyword.END:
+                    if token.type == TokenType.KEYWORD and token.value == Keyword.END:
                         if nestAmt == 0:
                             break
                         elif nestAmt > 0:
@@ -386,10 +494,10 @@ def compile_tokens_to_program(tokens,includePaths=[]):
                         else:
                             sys.exit(f"Error: nest amt is below zero {nestAmt}")
 
-                if token["type"] != Token.KEYWORD or token["value"] != Keyword.END:
-                    sys.exit("%s:%d:%d: ERROR: expected `end` at the end of the macro definition of `%s`" % (token["loc"] + (token["value"], )))
+                if token.type != TokenType.KEYWORD or token.value != Keyword.END:
+                    sys.exit("%s:%d:%d: ERROR: expected `end` at the end of the macro definition of `%s`" % (token.loc + (token.value, )))
                 else:
-                    macro["tokens"] = macro["tokens"][:-1]
+                    macro.tokens = macro.tokens[:-1]
                     
             else:
                 assert False, 'unreachable'
@@ -397,117 +505,126 @@ def compile_tokens_to_program(tokens,includePaths=[]):
             assert False, 'unreachable'
 
     if len(stack) > 0:
-        op = stack.pop()
-        sys.exit('%s:%d:%d: ERROR: unclosed block `%s`' % (program[op]["loc"] + (human(program[op]["type"]),)))
-    program.append({"type" : OP.INTRINSIC,"value": Intrinsic.EXIT})
-
+        opIdx = stack.pop()
+        sys.exit('%s:%d:%d: ERROR: unclosed block `%s`' % (program.ops[opIdx].token.loc + (human(program.ops[opIdx].type),)))
     return program
 
 """
 Program is a list of Ops
 OP is a dict with the follwing possible fields
-- `type` -- The type of the OP. One of OP.PUSH_INT, OP.IF, OP.INTRINSIC etc
+- `type` -- The type of the OpType. One of OpType.PUSH_INT, OpType.IF, OpType.INTRINSIC etc
 - `loc` -- location of the OP in the program it contains (`file_token`,  `row`, `col`)
-- `value` -- Only exists for some OPs like OP.PUSH_INT and all OP.INTRINSIC.
+- `value` -- Only exists for some OPs like OpType.PUSH_INT and all OpType.INTRINSIC.
 - `jmp` -- It is an optional field and is used for code blocks like if,else, while, end etc. It is created in compile_tokens_to_program
 """
 
-def load_program(program_token,includePaths=[]):
-    tokens = lex_file(program_token)
-    program = compile_tokens_to_program(tokens, includePaths)
+def load_program(file_path : str ,includePaths : List[str]=[]) -> Program:
+    tokens = lex_file(file_path)
+    program : Program = compile_tokens_to_program(tokens, includePaths)
     return program
 
-def compile_program(program, outFilePath):
+def compile_program(program : Program, outFilePath : str) -> None:
     with open(outFilePath,"w+") as wf:
         with open("static\startAsm.txt","r") as rf:
             text = rf.read()
         wf.write(text)
-        lt = []
-        strs = []
+        lt : List[str] = []
+        strs : List[str] = []
         #add implementation of logic
-        for i, op in enumerate(program):
+        for i, op in enumerate(program.ops):
             lt.append(f"addr_{i}:\n")
-            assert len(OP) == 10, "Exhaustive handling of operations whilst compiling"
+            assert len(OpType) == 12, "Exhaustive handling of operations whilst compiling"
 
-            if op["type"] == OP.PUSH_INT:
-                valToPush = op["value"]
+            if op.type == OpType.PUSH_INT:
+                valToPush = op.operand
                 lt.append(f"     ; -- push int {valToPush} --\n")
                 lt.append(f"      push {valToPush}\n")
             
-            if op["type"] == OP.PUSH_STR:
-                valToPush = op["value"]
+            if op.type == OpType.PUSH_STR:
+                valToPush = op.operand
+                assert isinstance(valToPush, str)
                 lt.append(f"      lea edi, str_{len(strs)}\n")
                 lt.append(f"      push {len(valToPush)}\n")
                 lt.append(f"      push edi\n")
                 strs.append(valToPush)
                 # assert False, "Not Implemented yet"
             
-            if op["type"] == OP.SYSCALL:
-                callName = op["value"]
+            if op.type == OpType.PUSH_MEM:
+                lt.append(f"      ;-- push mem {op.token.value}--\n")
+                lt.append(f"      lea edi, mem\n")
+                lt.append(f"      add edi, {op.operand}\n")
+                lt.append(f"      push edi\n")
+
+            if op.type == OpType.SYSCALL:
+                callName = op.operand
                 lt.append(f"     ; -- syscall {callName} --\n")
                 lt.append(f"      call {callName}\n")
                 lt.append(f"      push eax\n")
 
-            if op["type"] == OP.SYSVAL:
-                sysval = op["value"]
+            if op.type == OpType.SYSVAL:
+                sysval = op.operand
                 lt.append(f"     ; -- sysval {sysval} --\n")
                 lt.append(f"      push {sysval}\n")
+
+            if op.type == OpType.BREAK:
+                pass
             
-            if op["type"] == OP.IF:
-                if "jmp" not in op:
-                    sys.exit("%s:%d:%d ERROR: `if` can only be used when an `end` is mentioned" % program[i]["loc"])
-                jmpArg = op["jmp"]
+            if op.type == OpType.IF:
+                if not op.operand:
+                    sys.exit("%s:%d:%d ERROR: `if` can only be used when an `end` is mentioned" % program.ops[i].token.loc)
+                jmpArg = op.operand
                 lt.append(f" ; -- if --\n")
                 lt.append("      pop eax\n")
                 lt.append("      cmp eax, 1\n")
                 lt.append(f"      jne addr_{jmpArg}\n")
             
-            if op["type"] == OP.ELSE:
-                if "jmp" not in op:
-                    sys.exit("%s:%d:%d ERROR: `else` can only be used when an `end` is mentioned" % program[i]["loc"])
-                jmpArg = op["jmp"]
+            if op.type == OpType.ELSE:
+                if not op.operand:
+                    sys.exit("%s:%d:%d ERROR: `else` can only be used when an `end` is mentioned" % program.ops[i].token.loc)
+                jmpArg = op.operand
                 lt.append(f" ; -- else --\n")
                 lt.append(f"      jmp addr_{jmpArg}\n")
             
-            if op["type"] == OP.WHILE:
+            if op.type == OpType.WHILE:
                 lt.append(f" ; -- while --\n")
 
-            if op["type"] == OP.DO:
-                if "jmp" not in op:
-                    sys.exit("%s:%d:%d ERROR: `do` can only be used when an `end` is mentioned" % program[i]["loc"])
-                jmp_idx = op["jmp"]
+            if op.type == OpType.DO:
+                if not op.operand:
+                    sys.exit("%s:%d:%d ERROR: `do` can only be used when an `end` is mentioned" % program.ops[i].token.loc)
+                jmp_idx = op.operand
                 lt.append(f" ; -- do --\n")
                 lt.append( "      pop eax\n")
                 lt.append( "      cmp eax, 1\n")
                 lt.append(f"      jne addr_{jmp_idx}\n")
                 
-            if op["type"] == OP.END:
-                jmp_idx = op["jmp"]
-                if program[jmp_idx]["type"] == OP.WHILE:
+            if op.type == OpType.END:
+                assert isinstance(op.operand, int)
+                jmp_idx = op.operand
+                if program.ops[jmp_idx].type == OpType.WHILE:
                     lt.append(f"      ;-- endwhile --\n")
                     lt.append(f"      jmp addr_{jmp_idx}\n")
-                elif program[jmp_idx]["type"] == OP.IF:
+                elif program.ops[jmp_idx].type == OpType.IF:
                     lt.append(f"      ;-- endif --\n")
                 else:
                     lt.append(f"      ;-- end --\n")
 
-            assert len(Intrinsic) == 26, f"Exaustive handling of Intrinsic's in Compiling {len(Intrinsic)}"
-            if op["type"] == OP.INTRINSIC:
+            assert len(Intrinsic) == 27, f"Exaustive handling of Intrinsic's in Compiling {len(Intrinsic)}"
+            if op.type == OpType.INTRINSIC:
 
-                if op["value"] == Intrinsic.STDOUT:
+                if op.operand == Intrinsic.STDOUT:
                     lt.append("      ;-- print --\n")
                     lt.append("      pop eax\n")
                     lt.append("      invoke StdOut, addr [eax]\n")
 
-                if op["value"] == Intrinsic.EXIT:
+                if op.operand == Intrinsic.EXIT:
                     lt.append("     ; -- exit --\n")
                     lt.append("     invoke ExitProcess, 0\n")
 
-                if op["value"] == Intrinsic.DROP:
+                if op.operand == Intrinsic.DROP:
                     lt.append("      ; -- drop --\n")
                     lt.append("      pop eax\n")
 
-                if op["value"] == Intrinsic.ADD:
+                if op.operand == Intrinsic.ADD:
                     lt.append(f"     ; -- add --\n")
                     lt.append("      pop eax\n")
                     lt.append("      pop ebx\n")
@@ -515,14 +632,14 @@ def compile_program(program, outFilePath):
                     lt.append("      push eax\n")
 
 
-                if op["value"] == Intrinsic.SUB:
+                if op.operand == Intrinsic.SUB:
                     lt.append(f"     ; -- sub --\n")
                     lt.append("      pop ebx\n")
                     lt.append("      pop eax\n")
                     lt.append("      sub eax, ebx\n")
                     lt.append("      push eax\n")
 
-                if op["value"] == Intrinsic.DIVMOD:
+                if op.operand == Intrinsic.DIVMOD:
                     lt.append("    ; -- divmod --\n")
                     lt.append("      xor edx, edx\n")
                     lt.append("      pop ebx\n")
@@ -531,14 +648,14 @@ def compile_program(program, outFilePath):
                     lt.append("      push eax\n")
                     lt.append("      push edx\n")
                     
-                elif op["value"] == Intrinsic.MUL:
+                elif op.operand == Intrinsic.MUL:
                     lt.append("    ;; -- mul --\n")
                     lt.append("    pop  eax\n")
                     lt.append("    pop  ebx\n")
                     lt.append("    mul  ebx\n")
                     lt.append("    push eax\n")
 
-                if op["value"] == Intrinsic.EQUAL:
+                if op.operand == Intrinsic.EQUAL:
                     lt.append(f"     ; -- equal --\n")
                     lt.append(f"      pop eax\n")
                     lt.append(f"      pop ebx\n")
@@ -550,7 +667,7 @@ def compile_program(program, outFilePath):
                     lt.append(f"          push 0\n")
                     lt.append(f"      END{i}:\n")
                                 
-                if op["value"] == Intrinsic.NE:
+                if op.operand == Intrinsic.NE:
                     lt.append(f"     ; -- equal --\n")
                     lt.append(f"      pop eax\n")
                     lt.append(f"      pop ebx\n")
@@ -563,7 +680,7 @@ def compile_program(program, outFilePath):
                     lt.append(f"      END{i}:\n")
 
 
-                if op["value"] == Intrinsic.GT:
+                if op.operand == Intrinsic.GT:
                     lt.append(f"     ; -- greater than --\n")
                     lt.append(f"      pop eax\n")
                     lt.append(f"      pop ebx\n")
@@ -575,7 +692,7 @@ def compile_program(program, outFilePath):
                     lt.append(f"          push 0\n")
                     lt.append(f"      END{i}:\n")
 
-                if op["value"] == Intrinsic.LT:
+                if op.operand == Intrinsic.LT:
                     lt.append(f"     ; -- less than --\n")
                     lt.append(f"      pop eax\n")
                     lt.append(f"      pop ebx\n")
@@ -587,19 +704,19 @@ def compile_program(program, outFilePath):
                     lt.append(f"          push 0\n")
                     lt.append(f"      END{i}:\n")
 
-                if op["value"] == Intrinsic.DUMP:
+                if op.operand == Intrinsic.DUMP:
                     lt.append(f"      ; -- dump --\n")
                     lt.append("      pop eax\n")
                     lt.append("      lea edi, decimalstr\n")
                     lt.append("      call DUMP\n")
 
-                if op["value"] == Intrinsic.DUP:
+                if op.operand == Intrinsic.DUP:
                     lt.append("      ; -- duplicate (dup) --\n")
                     lt.append("      pop eax\n")
                     lt.append("      push eax\n")
                     lt.append("      push eax\n")
 
-                if op["value"] == Intrinsic.DUP2:
+                if op.operand == Intrinsic.DUP2:
                     lt.append("      ; -- 2 duplicate (2dup) --\n")
                     lt.append("      pop  eax\n")
                     lt.append("      pop  ebx\n")
@@ -608,7 +725,7 @@ def compile_program(program, outFilePath):
                     lt.append("      push ebx\n")
                     lt.append("      push eax\n")
 
-                if op["value"] == Intrinsic.OVER:
+                if op.operand == Intrinsic.OVER:
                     lt.append("      ; -- over --\n")
                     lt.append("      pop  eax\n")
                     lt.append("      pop  ebx\n")
@@ -616,7 +733,7 @@ def compile_program(program, outFilePath):
                     lt.append("      push eax\n")
                     lt.append("      push ebx\n")
 
-                if op["value"] == Intrinsic.OVER2:
+                if op.operand == Intrinsic.OVER2:
                     lt.append("      ; -- over2 --\n")
                     lt.append("      pop  eax\n")
                     lt.append("      pop  ebx\n")
@@ -626,7 +743,7 @@ def compile_program(program, outFilePath):
                     lt.append("      push eax\n")
                     lt.append("      push ecx\n")
 
-                if op["value"] == Intrinsic.SWAP:
+                if op.operand == Intrinsic.SWAP:
                     lt.append("      ; -- swap --\n")
                     lt.append("      pop  eax\n")
                     lt.append("      pop  ebx\n")
@@ -634,19 +751,19 @@ def compile_program(program, outFilePath):
                     lt.append("      push ebx\n")
 
 
-                if op["value"] == Intrinsic.MEM:
+                if op.operand == Intrinsic.MEM:
                     lt.append("      ;-- mem --\n")
                     lt.append("      lea edi, mem\n")
                     lt.append("      push edi\n")
 
-                if op["value"] == Intrinsic.LOAD:
+                if op.operand == Intrinsic.LOAD:
                     lt.append("      ;-- load (,) --\n")
                     lt.append("      pop eax\n")
                     lt.append("      xor ebx, ebx\n")
                     lt.append("      mov bl, [eax]\n")
                     lt.append("      push ebx\n")
             
-                if op["value"] == Intrinsic.LOAD32:
+                if op.operand == Intrinsic.LOAD32:
                     lt.append("      ;-- load32 --\n")
                     lt.append("      pop eax\n")
                     lt.append("      xor ebx, ebx\n")
@@ -654,20 +771,20 @@ def compile_program(program, outFilePath):
                     lt.append("      push ebx\n")
 
 
-                if op["value"] == Intrinsic.STORE:
+                if op.operand == Intrinsic.STORE:
                     lt.append("      ;-- store (.) --\n")
                     lt.append("      pop  eax\n")
                     lt.append("      pop  ebx\n")
                     lt.append("      mov  byte ptr [ebx], al\n")
 
-                if op["value"] == Intrinsic.STORE32:
+                if op.operand == Intrinsic.STORE32:
                     lt.append("      ;-- store32 --\n")
                     lt.append("      pop  eax\n")
                     lt.append("      pop  ebx\n")
                     lt.append("      mov  [ebx], eax\n")
 
 
-                if op["value"] == Intrinsic.SHL:
+                if op.operand == Intrinsic.SHL:
                     lt.append("      ;-- shl --\n")
                     lt.append("      pop ecx\n")
                     lt.append("      pop ebx\n")
@@ -675,27 +792,36 @@ def compile_program(program, outFilePath):
                     lt.append("      push ebx\n")
 
 
-                if op["value"] == Intrinsic.SHR:
+                if op.operand == Intrinsic.SHR:
                     lt.append("      ;-- shr --\n")
                     lt.append("      pop ecx\n")
                     lt.append("      pop ebx\n")
                     lt.append("      shr ebx, cl\n")
                     lt.append("      push ebx\n")
 
-                if op["value"] == Intrinsic.BOR:
+                if op.operand == Intrinsic.BOR:
                     lt.append("      ;-- bor --\n")
                     lt.append("      pop eax\n")
                     lt.append("      pop ebx\n")
                     lt.append("      or ebx, eax\n")
                     lt.append("      push  ebx\n")
 
-                if op["value"] == Intrinsic.BAND:
+                if op.operand == Intrinsic.BAND:
                     lt.append("      ;-- band --\n")
                     lt.append("      pop eax\n")
                     lt.append("      pop ebx\n")
                     lt.append("      and ebx, eax\n")
                     lt.append("      push  ebx\n")
 
+                if op.operand == Intrinsic.BXOR:
+                    lt.append("      ;-- bxor --\n")
+                    lt.append("      pop eax\n")
+                    lt.append("      pop ebx\n")
+                    lt.append("      xor ebx, eax\n")
+                    lt.append("      push  ebx\n")
+
+
+        lt.append(f"addr_{len(program.ops)}:\n")
         wf.write(".data\n")
         wf.write("    decimalstr db 16 DUP (0)  ; address to store dump values\n")
         wf.write("    aSymb db 97, 0\n")
@@ -705,7 +831,7 @@ def compile_program(program, outFilePath):
             sAsNum = ", ".join(map(str,list(bytes(s,"utf-8"))))
             wf.write(f"    str_{i} db {sAsNum}, 0 \n")
         wf.write(".data?\n")
-        wf.write("    mem db 100000 dup(?)\n")
+        wf.write(f"    mem db {program.memory_capacity} dup(?)\n")
         wf.write(".code\n")
         wf.write("    start PROC\n")
 
@@ -736,43 +862,65 @@ sysvalues = {
     "FILE_CUR" : SV.FILE_CUR
 }
 
-def getStrFromAddr(addr, lst):
+def getStrFromAddr(addr : int, mem_buffer : bytearray) -> str:
     string = ""
-    while lst[addr] != 0:
-        string += chr(lst[addr])
+    while mem_buffer[addr] != 0:
+        string += chr(mem_buffer[addr])
         addr += 1
     return string
-
-MEM_CAPACITY = 690_000
+MEM_PADDING = 1
 STR_CAPACITY = 690_000
-def simulate_program(program):
-    stack = []
-    handles = []
-    mem = bytearray(MEM_CAPACITY + STR_CAPACITY)
-    strPtr = STR_CAPACITY
-    i = 0
-    while i < len(program):
-        op = program[i]
+def simulate_program(program : Program) -> None:
+    stack : List[int] = []
+    handles : List[TextIO] = []
+    mem = bytearray(MEM_PADDING + program.memory_capacity + STR_CAPACITY)
+    mem_buf_ptr = MEM_PADDING
 
-        assert len(OP) == 10, f"Exhaustive handling of operations whilst simulating {len(OP)}"
-        if op["type"] == OP.PUSH_INT:
-            stack.append(op["value"])
+    str_buf_ptr = MEM_PADDING + program.memory_capacity
+    str_size = 0
+    str_ptrs : Dict[int, int] = {}
+
+    breakpoint = False
+    show_strings = [False, 20]
+    show_mem = [False, 50]
+
+    i : int = 0
+    while i < len(program.ops):
+        op = program.ops[i]
+        # print(stack)
+
+        assert len(OpType) == 12, f"Exhaustive handling of operations whilst simulating {len(OpType)}"
+        if op.type == OpType.PUSH_INT:
+            assert isinstance(op.operand, int)
+            valToPush = op.operand
+            if valToPush < 0:
+                valToPush = -valToPush
+                valToPush = valToPush^0xFFFFFFFF
+                valToPush += 1
+            stack.append(valToPush)
             i += 1
         
-        elif op["type"] == OP.PUSH_STR:
-            bs = bytes(op["value"], "utf-8")
+        elif op.type == OpType.PUSH_STR:
+            assert isinstance(op.operand, str)
+            bs = bytes(op.operand, "utf-8")
             n = len(bs)
-            if "addr" not in op:
-                op["addr"] = strPtr
-                mem[strPtr:strPtr+n] = bs
-                strPtr += n
-                assert strPtr <= STR_CAPACITY+MEM_CAPACITY, "String Buffer Overflow"
-            stack.append(len(op["value"]))
-            stack.append(op["addr"])
+            stack.append(n)
+            if i not in str_ptrs:
+                str_ptr = str_buf_ptr + str_size
+                str_ptrs[i] = str_ptr
+                mem[str_ptr:str_ptr+n] = bs
+                str_size += n
+                assert str_size <= STR_CAPACITY+program.memory_capacity, "String Buffer Overflow"
+            stack.append(str_ptrs[i])
+            i += 1
+        
+        elif op.type == OpType.PUSH_MEM:
+            assert isinstance(op.operand, MemAddr)
+            stack.append(op.operand + mem_buf_ptr)
             i += 1
 
-        elif op["type"] == OP.SYSCALL:
-            if op["value"] == "CreateFile":
+        elif op.type == OpType.SYSCALL:
+            if op.operand == "CreateFile":
                 fileNameIdx = stack.pop()
                 stack = stack[:-6]
                 fileName = getStrFromAddr(fileNameIdx, mem)
@@ -780,7 +928,7 @@ def simulate_program(program):
                 handles.append(open(fileName, "r+"))
                 stack.append(len(handles)-1)
 
-            elif op["value"] == "WriteFile":
+            elif op.operand == "WriteFile":
                 handleIdx = stack.pop()
                 stringIdx = stack.pop()
                 stack = stack[:-3]
@@ -789,25 +937,25 @@ def simulate_program(program):
                 handle.write(string)
                 stack.append(1)
             
-            elif op["value"] == "ReadFile":
+            elif op.operand == "ReadFile":
                 handleIdx = stack.pop()
-                store_addr32 = stack.pop()
+                read_file_store_addr32 = stack.pop()
                 amtToRead = stack.pop()
                 stack = stack[:-2]
                 if handleIdx >= len(handles):
-                    sys.exit("%s:%d:%d ERROR: handles index %s is out" % op["loc"] + (handleIdx,))
+                    sys.exit("%s:%d:%d ERROR: handles index %s is out" % (op.token.loc + (handleIdx,)))
                 handle = handles[handleIdx]
                 
-                store_value = handle.read(amtToRead)
+                text_read = handle.read(amtToRead)
                 for j in range(amtToRead):
-                    mem[store_addr32 + j] = ord(store_value[j])
+                    mem[read_file_store_addr32 + j] = ord(text_read[j])
                 stack.append(1)
 
-            elif op["value"] == "CloseHandle":
+            elif op.operand == "CloseHandle":
                 handleIdx = stack.pop()
                 handles[handleIdx].close()
                 stack.append(1)
-            elif op["value"] == "SetFilePointer":
+            elif op.operand == "SetFilePointer":
                 handleIdx = stack.pop()
                 amtToMove = stack.pop()
                 stack.pop()
@@ -819,177 +967,189 @@ def simulate_program(program):
                 elif moveMethod == SV.FILE_END:
                     whence = 2
                 else:
-                    sys.exit("%s:%d:%d ERROR: invalid move method %s in SetFilePointer" % op["loc"] + (moveMethod,))
+                    sys.exit("%s:%d:%d ERROR: invalid move method %s in SetFilePointer" % (op.token.loc + (moveMethod,)))
                 
                 handle = handles[handleIdx]
                 handle.seek(amtToMove, whence)
                 stack.append(1)
-            elif op["value"] == "SetEndOfFile":
+            elif op.operand == "SetEndOfFile":
                 handleIdx = stack.pop()
                 handle = handles[handleIdx]
                 handle.truncate()
                 stack.append(1)
             else:
-                sys.exit("%s:%d:%d ERROR: syscall %s not found" % (op["loc"] + (op["value"],)))            
+                sys.exit("%s:%d:%d ERROR: syscall %s not found" % (op.token.loc + (op.operand,)))            
             
             i += 1
         
-        elif op["type"] == OP.SYSVAL:
-            if op["value"] in sysvalues:
-                stack.append(int(sysvalues[op["value"]]))
+        elif op.type == OpType.SYSVAL:
+            if op.operand in sysvalues:
+                assert isinstance(op.operand, str)
+                stack.append(int(sysvalues[op.operand]))
             else:
-                sys.exit("%s:%d:%d ERROR: sysvalue %s not found" % op["loc"] + (op["value"],))
+                sys.exit("%s:%d:%d ERROR: sysvalue %s not found" % (op.token.loc + (op.operand,)))
             i += 1
 
-        elif op["type"] == OP.IF:
+        elif op.type == OpType.BREAK:
+            breakpoint = True
+            i += 1
+
+        elif op.type == OpType.IF:
             a = stack.pop()
-            if "jmp" not in op:
-                sys.exit("%s:%d:%d ERROR: `if` can only be used when an `end` is mentioned" % program[i]["loc"])
+            if not op.operand:
+                sys.exit("%s:%d:%d ERROR: `if` can only be used when an `end` is mentioned" % program.ops[i].token.loc)
             if a == 0:
-                i = op["jmp"]
+                assert isinstance(op.operand, int)
+                i = op.operand
             else:
                 i += 1
 
-        elif op["type"] == OP.ELSE:
-            if "jmp" not in op:
-                sys.exit("%s:%d:%d ERROR: `else` can only be used when an `end` is mentioned" % program[i]["loc"])
-            i = op["jmp"]
+        elif op.type == OpType.ELSE:
+            if not op.operand:
+                sys.exit("%s:%d:%d ERROR: `else` can only be used when an `end` is mentioned" % program.ops[i].token.loc)
+            assert isinstance(op.operand, int)
+            i = op.operand
         
-        elif op["type"] == OP.WHILE:
+        elif op.type == OpType.WHILE:
             i += 1
 
-        elif op["type"] == OP.DO:
-            if "jmp" not in op:
-                sys.exit("%s:%d:%d ERROR: `do` can only be used when an `end` is mentioned" % program[i]["loc"])
+        elif op.type == OpType.DO:
+            if not op.operand:
+                sys.exit("%s:%d:%d ERROR: `do` can only be used when `end` is mentioned" % program.ops[i].token.loc)
 
             a = stack.pop()
             if a == 0:
-                i = op["jmp"]
+                assert isinstance(op.operand, int)
+                i = op.operand
             else:
                 i += 1
 
-        elif op["type"] == OP.END:
-            i = op["jmp"]
+        elif op.type == OpType.END:
+            assert isinstance(op.operand, int)
+            i = op.operand
 
-        elif op["type"] == OP.INTRINSIC:
+        elif op.type == OpType.INTRINSIC:
         
-            assert len(Intrinsic) == 26, f"Exaustive handling of Intrinsic's in Simulation {len(Intrinsic)}"
-            if op["value"] == Intrinsic.EXIT:
-                if i != len(program) - 1:
+            assert len(Intrinsic) == 27, f"Exaustive handling of Intrinsic's in Simulation {len(Intrinsic)}"
+            if op.operand == Intrinsic.EXIT:
+                exit()
+                i += 1
+
+            if op.operand == Intrinsic.DROP:
+                try:
+                    stack.pop()
+                except IndexError:
+                    print("%s:%d:%d" % op.token.loc)
                     exit()
                 i += 1
 
-            if op["value"] == Intrinsic.DROP:
-                stack.pop()
-                i += 1
-
-            elif op["value"] == Intrinsic.ADD:
+            elif op.operand == Intrinsic.ADD:
                 a = stack.pop()
                 b = stack.pop()
                 stack.append(a+b)
                 i += 1
 
-            elif op["value"] == Intrinsic.SUB:
+            elif op.operand == Intrinsic.SUB:
                 a = stack.pop()
                 b = stack.pop()
                 stack.append(b-a)
                 i += 1
             
-            elif op["value"] == Intrinsic.DIVMOD:
+            elif op.operand == Intrinsic.DIVMOD:
                 a = stack.pop()
                 b = stack.pop()
                 stack.append(b//a)
                 stack.append(b%a)
                 i += 1
 
-            elif op["value"] == Intrinsic.MUL:
+            elif op.operand == Intrinsic.MUL:
                 a = stack.pop()
                 b = stack.pop()
                 stack.append(b*a)
                 i += 1
 
-            elif op["value"] == Intrinsic.EQUAL:
+            elif op.operand == Intrinsic.EQUAL:
                 a = stack.pop()
                 b = stack.pop()
                 stack.append(int(a == b))
                 i += 1
 
-            elif op["value"] == Intrinsic.NE:
+            elif op.operand == Intrinsic.NE:
                 a = stack.pop()
                 b = stack.pop()
                 stack.append(int(a != b))
                 i += 1
             
-            elif op["value"] == Intrinsic.NE:
+            elif op.operand == Intrinsic.NE:
                 a = stack.pop()
                 b = stack.pop()
                 stack.append(int(a != b))
                 i += 1
 
-            elif op["value"] == Intrinsic.GT:
+            elif op.operand == Intrinsic.GT:
                 b = stack.pop()
                 a = stack.pop()
                 stack.append(int(a > b))
                 i += 1
 
-            elif op["value"] == Intrinsic.LT:
+            elif op.operand == Intrinsic.LT:
                 b = stack.pop()
                 a = stack.pop()
                 stack.append(int(a < b))
                 i += 1
 
 
-            elif op["value"] == Intrinsic.DUP:
+            elif op.operand == Intrinsic.DUP:
                 stack.append(stack[-1])
                 i += 1
 
-            elif op["value"] == Intrinsic.DUP2:
+            elif op.operand == Intrinsic.DUP2:
                 stack.append(stack[-2])
                 stack.append(stack[-2])
                 i += 1
 
 
-            elif op["value"] == Intrinsic.OVER:
+            elif op.operand == Intrinsic.OVER:
                 stack.append(stack[-2])
                 i += 1
 
-            elif op["value"] == Intrinsic.OVER2:
+            elif op.operand == Intrinsic.OVER2:
                 stack.append(stack[-3])
                 i += 1
 
-            elif op["value"] == Intrinsic.SWAP:
+            elif op.operand == Intrinsic.SWAP:
                 temp = stack[-1]
                 stack[-1] = stack[-2]
                 stack[-2] = temp
                 i += 1
 
-            elif op["value"] == Intrinsic.DUMP:
+            elif op.operand == Intrinsic.DUMP:
                 a = stack.pop()
                 print(a)
                 i += 1
 
-            elif op["value"] == Intrinsic.MEM:
+            elif op.operand == Intrinsic.MEM:
                 stack.append(0)
                 i += 1
 
-            elif op["value"] == Intrinsic.LOAD:
+            elif op.operand == Intrinsic.LOAD:
                 addr = stack.pop()
                 byte = mem[addr]
                 stack.append(byte)
                 i += 1
 
-            elif op["value"] == Intrinsic.LOAD32:
+            elif op.operand == Intrinsic.LOAD32:
                 addr = stack.pop()
                 stack.append(mem[addr] | (mem[addr + 1]<<8) | (mem[addr + 2]<<16) | (mem[addr + 3]<<24) )
                 i += 1
 
-            elif op["value"] == Intrinsic.STORE:
+            elif op.operand == Intrinsic.STORE:
                 val = stack.pop()
                 addr = stack.pop()
                 mem[addr] = val & 0xFF
                 i += 1
 
-            elif op["value"] == Intrinsic.STORE32:
+            elif op.operand == Intrinsic.STORE32:
                 store_value = stack.pop()
                 store_addr32 = stack.pop()
                 mem[store_addr32 + 0] = store_value & 0xff
@@ -998,44 +1158,62 @@ def simulate_program(program):
                 mem[store_addr32 + 3] = (store_value>>24) & 0xff
                 i += 1
 
-            elif op["value"] == Intrinsic.STDOUT:
+            elif op.operand == Intrinsic.STDOUT:
                 addr = stack.pop()
-                addrStr = addr
                 while mem[addr] != 0:
                     print(chr(mem[addr]), end='')
                     addr += 1
                 i += 1
                 # print(addrStr, mem[addrStr:addrStr+20])
 
-            elif op["value"] == Intrinsic.SHL:
+            elif op.operand == Intrinsic.SHL:
                 shiftAmt = stack.pop()
                 val = stack.pop()
                 stack.append(val << shiftAmt)
                 i += 1
 
-            elif op["value"] == Intrinsic.SHR:
+            elif op.operand == Intrinsic.SHR:
                 shiftAmt = stack.pop()
                 val = stack.pop()
                 stack.append(val >> shiftAmt)
                 i += 1
 
-            elif op["value"] == Intrinsic.BOR:
+            elif op.operand == Intrinsic.BOR:
                 a= stack.pop()
                 b = stack.pop()
                 stack.append(a | b)
                 i += 1
 
-            elif op["value"] == Intrinsic.BAND:
+            elif op.operand == Intrinsic.BAND:
                 a= stack.pop()
                 b = stack.pop()
                 stack.append(a & b)
                 i += 1
-        # if "value" in op: 
-        #     print(i,op["type"],op["value"] , stack, mem[:31])
-        #     print(mem[:31])
-        # else:
-        #     print(i,op["type"], stack, mem[:31])
-        # input()
+            elif op.operand == Intrinsic.BXOR:
+                a= stack.pop()
+                b = stack.pop()
+                stack.append(a ^ b)
+                i += 1
+
+        if breakpoint:
+            print(f"{op.token.text}: {stack}")
+            flags = input()
+            for val in flags.split(" "):
+                if val.startswith("s"):
+                    val = val[1:]
+                    show_strings[0] = not show_strings[0]
+                    if val.isnumeric():
+                        show_strings[1] = int(val)
+                        
+                elif val.startswith("m"):
+                    val = val[1:]
+                    show_mem[0] = not show_mem[0]
+                    if val.isnumeric():
+                        show_mem[1] = int(val)
+            if show_strings[0]:
+                print(f"strings: {mem[str_buf_ptr:str_buf_ptr + show_strings[1]]}")
+            if show_mem[0]:
+                print(f"mem: {mem[mem_buf_ptr:mem_buf_ptr + show_mem[1]]}")
 
 def usage(program_token):
     print("Usage: %s [OPTIONS] <SUBCOMMAND> [ARGS]" % program_token)

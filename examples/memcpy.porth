@@ -1,0 +1,6 @@
+include "std.porth"
+
+memory hello 20 end
+
+"Hello world\n" hello memcpy
+hello stdout

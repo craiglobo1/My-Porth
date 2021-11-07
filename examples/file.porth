@@ -4,7 +4,7 @@ macro fh mem end
 macro buffer mem 100 + end
 
 
-"craig3.txt" fopen
+"craig4.txt" fopen
 fh swap store32
 fh load32 truncate
 "cr" fh load32 fwrite
