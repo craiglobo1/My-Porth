@@ -58,7 +58,6 @@ class Intrinsic(Enum):
     OVER2= auto()
     SWAP = auto()
     # mem operations
-    MEM = auto()
     STORE = auto()
     LOAD = auto()
     STORE32 = auto()
@@ -102,7 +101,7 @@ KEYWORD_NAMES = {
     "end"   :   Keyword.END,
 }
 
-assert len(Intrinsic) == 27 , f"Exhaustive handling in INTRINSIC_WORDS {len(Intrinsic)}"
+assert len(Intrinsic) == 26 , f"Exhaustive handling in INTRINSIC_WORDS {len(Intrinsic)}"
 INTRINSIC_WORDS = {
     "stdout" : Intrinsic.STDOUT,
     "exit"  : Intrinsic.EXIT,
@@ -121,7 +120,6 @@ INTRINSIC_WORDS = {
     "swap"  : Intrinsic.SWAP,
     "over"  : Intrinsic.OVER,
     "2over" : Intrinsic.OVER2,
-    "mem"   : Intrinsic.MEM,
     "store8"     : Intrinsic.STORE,
     "load8"     : Intrinsic.LOAD,
     "store32":Intrinsic.STORE32,
@@ -391,7 +389,7 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                 if callName.type != TokenType.STR:
                     sys.exit("%s:%d:%d: ERROR: expected syscall name to be %s but found %s" % (token.loc + (human(TokenType.STR), human(token.type))))
 
-                op = Op(OpType.SYSCALL, token)
+                op = Op(OpType.SYSCALL, token, callName.value)
                 program.ops.append(op)
                 ip += 1
 
@@ -400,7 +398,7 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                 if sysval.type != TokenType.STR:
                     sys.exit("%s:%d:%d: ERROR: expected sysval name to be %s but found %s" % (token.loc + (human(TokenType.STR), human(token.type))))
 
-                op = Op(OpType.SYSVAL, token)
+                op = Op(OpType.SYSVAL, token, sysval.value)
                 program.ops.append(op)
                 ip += 1
 
@@ -608,7 +606,7 @@ def compile_program(program : Program, outFilePath : str) -> None:
                 else:
                     lt.append(f"      ;-- end --\n")
 
-            assert len(Intrinsic) == 27, f"Exaustive handling of Intrinsic's in Compiling {len(Intrinsic)}"
+            assert len(Intrinsic) == 26, f"Exaustive handling of Intrinsic's in Compiling {len(Intrinsic)}"
             if op.type == OpType.INTRINSIC:
 
                 if op.operand == Intrinsic.STDOUT:
@@ -616,15 +614,15 @@ def compile_program(program : Program, outFilePath : str) -> None:
                     lt.append("      pop eax\n")
                     lt.append("      invoke StdOut, addr [eax]\n")
 
-                if op.operand == Intrinsic.EXIT:
+                elif op.operand == Intrinsic.EXIT:
                     lt.append("     ; -- exit --\n")
                     lt.append("     invoke ExitProcess, 0\n")
 
-                if op.operand == Intrinsic.DROP:
+                elif op.operand == Intrinsic.DROP:
                     lt.append("      ; -- drop --\n")
                     lt.append("      pop eax\n")
 
-                if op.operand == Intrinsic.ADD:
+                elif op.operand == Intrinsic.ADD:
                     lt.append(f"     ; -- add --\n")
                     lt.append("      pop eax\n")
                     lt.append("      pop ebx\n")
@@ -632,14 +630,14 @@ def compile_program(program : Program, outFilePath : str) -> None:
                     lt.append("      push eax\n")
 
 
-                if op.operand == Intrinsic.SUB:
+                elif op.operand == Intrinsic.SUB:
                     lt.append(f"     ; -- sub --\n")
                     lt.append("      pop ebx\n")
                     lt.append("      pop eax\n")
                     lt.append("      sub eax, ebx\n")
                     lt.append("      push eax\n")
 
-                if op.operand == Intrinsic.DIVMOD:
+                elif op.operand == Intrinsic.DIVMOD:
                     lt.append("    ; -- divmod --\n")
                     lt.append("      xor edx, edx\n")
                     lt.append("      pop ebx\n")
@@ -749,12 +747,6 @@ def compile_program(program : Program, outFilePath : str) -> None:
                     lt.append("      pop  ebx\n")
                     lt.append("      push eax\n")
                     lt.append("      push ebx\n")
-
-
-                if op.operand == Intrinsic.MEM:
-                    lt.append("      ;-- mem --\n")
-                    lt.append("      lea edi, mem\n")
-                    lt.append("      push edi\n")
 
                 if op.operand == Intrinsic.LOAD:
                     lt.append("      ;-- load (,) --\n")
@@ -868,21 +860,26 @@ def getStrFromAddr(addr : int, mem_buffer : bytearray) -> str:
         string += chr(mem_buffer[addr])
         addr += 1
     return string
+
 MEM_PADDING = 1
 STR_CAPACITY = 690_000
-def simulate_program(program : Program) -> None:
+ARGS_CAPACITY = 10_000
+def simulate_program(program : Program, argv : List[str]) -> None:
     stack : List[int] = []
     handles : List[TextIO] = []
-    mem = bytearray(MEM_PADDING + program.memory_capacity + STR_CAPACITY)
+    mem = bytearray(MEM_PADDING + program.memory_capacity + STR_CAPACITY + ARGS_CAPACITY)
     mem_buf_ptr = MEM_PADDING
 
     str_buf_ptr = MEM_PADDING + program.memory_capacity
     str_size = 0
     str_ptrs : Dict[int, int] = {}
 
+    args_buf_ptr = MEM_PADDING + program.memory_capacity + STR_CAPACITY
+
     breakpoint = False
     show_strings = [False, 20]
     show_mem = [False, 50]
+    show_args = [False, 50]
 
     i : int = 0
     while i < len(program.ops):
@@ -977,6 +974,13 @@ def simulate_program(program : Program) -> None:
                 handle = handles[handleIdx]
                 handle.truncate()
                 stack.append(1)
+            elif op.operand == "GetCommandLine":
+                bs = bytes("simulated_program " + " ".join(argv), "utf-8")
+                n = len(bs)
+                if i not in str_ptrs:
+                    mem[args_buf_ptr:args_buf_ptr+n] = bs
+                    assert args_buf_ptr+n <= args_buf_ptr+ARGS_CAPACITY, "String Buffer Overflow"
+                stack.append(args_buf_ptr)
             else:
                 sys.exit("%s:%d:%d ERROR: syscall %s not found" % (op.token.loc + (op.operand,)))            
             
@@ -1030,7 +1034,7 @@ def simulate_program(program : Program) -> None:
 
         elif op.type == OpType.INTRINSIC:
         
-            assert len(Intrinsic) == 27, f"Exaustive handling of Intrinsic's in Simulation {len(Intrinsic)}"
+            assert len(Intrinsic) == 26, f"Exaustive handling of Intrinsic's in Simulation {len(Intrinsic)}"
             if op.operand == Intrinsic.EXIT:
                 exit()
                 i += 1
@@ -1128,10 +1132,6 @@ def simulate_program(program : Program) -> None:
                 print(a)
                 i += 1
 
-            elif op.operand == Intrinsic.MEM:
-                stack.append(0)
-                i += 1
-
             elif op.operand == Intrinsic.LOAD:
                 addr = stack.pop()
                 byte = mem[addr]
@@ -1210,10 +1210,17 @@ def simulate_program(program : Program) -> None:
                     show_mem[0] = not show_mem[0]
                     if val.isnumeric():
                         show_mem[1] = int(val)
+                elif val.startswith("a"):
+                    val = val[1:]
+                    show_args[0] = not show_args[0]
+                    if val.isnumeric():
+                        show_args[1] = int(val)
             if show_strings[0]:
                 print(f"strings: {mem[str_buf_ptr:str_buf_ptr + show_strings[1]]}")
             if show_mem[0]:
                 print(f"mem: {mem[mem_buf_ptr:mem_buf_ptr + show_mem[1]]}")
+            if show_args[0]:
+                print(f"args: {mem[args_buf_ptr:args_buf_ptr + show_args[1]]}")
 
 def usage(program_token):
     print("Usage: %s [OPTIONS] <SUBCOMMAND> [ARGS]" % program_token)
@@ -1234,7 +1241,7 @@ def callCmd(cmd):
 
 
 def main():
-    argv = sys.argv
+    argv : List[str] = sys.argv
     compilerPath, *argv = argv
     if len(sys.argv) < 2:
         usage(sys.argv[0])
@@ -1278,7 +1285,7 @@ def main():
             programBuildTime = time.time()
 
         print("[INFO] loaded program")
-        simulate_program(program)
+        simulate_program(program, argv)
         if timed:
             print(f"[TIME] Run Time: {time.time() - programBuildTime} secs")
     
@@ -1329,7 +1336,7 @@ def main():
             print(f"[TIME] Compile Time: {time.time() - start} secs")
             start = time.time()
         if run:
-            callCmd([f"{basePath}.exe"])
+            callCmd([f"{basePath}.exe",*argv])
             if timed:
                 print(f"[TIME] Run Time: {time.time()- start} secs")
     

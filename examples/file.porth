@@ -1,12 +1,17 @@
 include "std.porth"
 
-macro fh mem end
-macro buffer mem 100 + end
+memory fh 4 end
+memory buffer 100 end
 
 
-"craig4.txt" fopen
-fh swap store32
-fh load32 truncate
-"cr" fh load32 fwrite
-// 20 buffer fh load32 fread
-fh load32 fclose
+"test_write.txt" fopen
+fh swap !32
+fh @32 truncate
+"Hello world" fh @32 fwrite
+fh @32 fclose
+
+"test_read.txt" fopen
+fh swap !32
+30 buffer fh @32 fread drop
+buffer stdout
+fh @32 fclose
