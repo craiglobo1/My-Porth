@@ -1,4 +1,0 @@
-macro isGreaterThan10 
-    10
-end
-11 isGreaterThan10

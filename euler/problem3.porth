@@ -3,7 +3,7 @@ include "std.porth"
 macro N 13195 end
 
 N 2 while over 1 > do
-    2dup mod 0 = if
+    if 2dup mod 0 = do
         swap over div swap
     else
         1 +

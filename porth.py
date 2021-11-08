@@ -21,6 +21,7 @@ class Keyword(Enum):
     # blocks
     IF = auto()
     ELSE = auto()
+    ELIF = auto()
     WHILE = auto()
     DO = auto()
     MACRO = auto()
@@ -34,10 +35,6 @@ class Keyword(Enum):
 class Intrinsic(Enum):
     # win32 api operations
     STDOUT = auto()
-    # FOPEN = auto()
-    # FWRITE = auto()
-    # FREAD = auto()
-    # FCLOSE = auto()
     EXIT = auto()
     # arithmetic operations
     ADD = auto()
@@ -80,16 +77,18 @@ class OpType(Enum):
     # blocks
     IF = auto()
     ELSE = auto()
+    ELIF = auto()
     WHILE = auto()
     DO = auto()
     END = auto()
     BREAK = auto()
     INTRINSIC = auto()
 
-assert len(Keyword) == 11, f"Exhaustive handling in KEYWORD NAMES {len(Keyword)}"
+assert len(Keyword) == 12, f"Exhaustive handling in KEYWORD NAMES {len(Keyword)}"
 KEYWORD_NAMES = {
     "if"    :   Keyword.IF,
     "else"  :   Keyword.ELSE,
+    "elif"    :   Keyword.ELIF,
     "while" :   Keyword.WHILE,
     "do"    :   Keyword.DO,
     "macro" :   Keyword.MACRO,
@@ -130,6 +129,7 @@ INTRINSIC_WORDS = {
     "band"  : Intrinsic.BAND,
     "bxor"  : Intrinsic.BXOR
 }
+INTRINSIC_WORDS_TO_INTRINSIC = { val:key for key, val in INTRINSIC_WORDS.items() }
 
 Loc=Tuple[str, int, int]
 
@@ -151,7 +151,7 @@ MemAddr=int
 class Op:
     type: OpType
     token: Token 
-    operand: Optional[Union[int, str, Intrinsic, OpAddr]] = None
+    operand: Optional[Union[int, str, Intrinsic, OpAddr, Tuple[str, int]]] = None
 
 @dataclass
 class Program:
@@ -238,6 +238,9 @@ class Macro:
     loc: Loc
     tokens: List[Token]
 
+def readable_enum(enum_val : Union[TokenType, OpType, Keyword, Intrinsic, Type] ) -> str:
+    return str(enum_val).split(".")[-1].lower()
+
 def evaluate_constant_from_tokens(rtokens : List[Token]) -> int:
     stack : List[int] = []
     while len(rtokens) > 0:
@@ -251,11 +254,11 @@ def evaluate_constant_from_tokens(rtokens : List[Token]) -> int:
             assert isinstance(token.value, int)
             stack.append(token.value)
         elif token.type == TokenType.WORD:
-            if token.value == Intrinsic.ADD:
+            if token.value == INTRINSIC_WORDS_TO_INTRINSIC[Intrinsic.ADD]:
                 a = stack.pop()
                 b = stack.pop()
                 stack.append(a + b)
-            elif token.value == Intrinsic.MUL:
+            elif token.value == INTRINSIC_WORDS_TO_INTRINSIC[Intrinsic.MUL]:
                 a = stack.pop()
                 b = stack.pop()
                 stack.append(a*b)
@@ -269,7 +272,6 @@ def evaluate_constant_from_tokens(rtokens : List[Token]) -> int:
     return stack.pop()
 
 def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[]) -> Program:
-    human = lambda x: str(x).split(".")[-1].lower()
     stack : List[OpAddr] = []
     program: Program = Program(ops=[], memory_capacity=0)
     rtokens : List[Token] = list(reversed(tokens))
@@ -277,6 +279,10 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
     memories : Dict[str, MemAddr] = {}
     ip : OpAddr = 0
     while len(rtokens) > 0:
+        # try:
+        #     print([program.ops[val].type for val in stack])
+        # except:
+        #     sys.exit(f"{stack} {[program.ops[val].type for val in stack[:-1]]} {len(program.ops)}")
         # TODO: some sort of safety mechanism for recursive macros
         token : Token = rtokens.pop()
 
@@ -330,38 +336,12 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
             ip += 1
 
         elif token.type == TokenType.KEYWORD:
-            assert len(Keyword) == 11, "Exhaustive ops handling in compile_tokens_to_program. Only ops that form blocks must be handled"
+            assert len(Keyword) == 12, "Exhaustive ops handling in compile_tokens_to_program. Only ops that form blocks must be handled"
+
             if token.value == Keyword.IF:
                 op = Op(OpType.IF, token)
                 program.ops.append(op)
                 stack.append(ip)
-                ip += 1
-
-            elif token.value == Keyword.ELSE:
-                op = Op(OpType.ELSE, token)
-                program.ops.append(op)
-                if_ip = stack.pop()
-                if program.ops[if_ip].type != OpType.IF:
-                    sys.exit('%s:%d:%d: ERROR: `else` can only be used in `if`-blocks' % program.ops[if_ip].token.loc)
-                program.ops[if_ip].operand = ip + 1
-                stack.append(ip)
-                ip += 1
-
-            elif token.value == Keyword.END:
-                op = Op(OpType.END, token)
-                program.ops.append(op)
-                block_ip = stack.pop()
-                if program.ops[block_ip].type == OpType.IF or program.ops[block_ip].type == OpType.ELSE:
-                    program.ops[block_ip].operand = ip
-                    program.ops[ip].operand = ip + 1
-
-                elif program.ops[block_ip].type == OpType.DO:
-                    assert program.ops[block_ip].operand is not None
-                    program.ops[ip].operand = program.ops[block_ip].operand
-                    program.ops[block_ip].operand = ip + 1
-                else:
-                    print([op.token.text for op in program.ops])
-                    sys.exit('%s:%d:%d: ERROR: `end` can only close `if`, `else` or `do` blocks for now' % program.ops[block_ip].token.loc)
                 ip += 1
 
             elif token.value == Keyword.WHILE:
@@ -373,9 +353,98 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
             elif token.value == Keyword.DO:
                 op = Op(OpType.DO, token)
                 program.ops.append(op)
-                while_ip = stack.pop()
-                program.ops[ip].operand = while_ip
+                try:
+                    pre_do_ip : OpAddr = stack.pop()
+                except IndexError:
+                    sys.exit("%s:%d:%d do token must have a if, while, elif statement before it (stack underflow)" % token.loc)
+
+                # if program.ops[pre_do_ip].type not in [OpType.WHILE, OpType.IF, OpType.ELIF]:
+                #     sys.exit("%s:%d:%d do token must have a if, while, elif statement before it (wrong op of `%s` and operand ``%s`)" % (token.loc + (program.ops[pre_do_ip].type,program.ops[pre_do_ip].operand)))
+                program.ops[ip].operand = pre_do_ip
                 stack.append(ip)
+                ip += 1
+
+            elif token.value == Keyword.ELIF:
+                op = Op(OpType.ELIF, token)
+                program.ops.append(op)
+                try:
+                    do_ip = stack.pop()
+                except IndexError:
+                    sys.exit("%s:%d:%d elif token must have a do statement preceding it (stack underflow)" % token.loc)
+    
+                if program.ops[do_ip].type != OpType.DO:
+                    sys.exit('%s:%d:%d: ERROR: `elif` can only be used in `do`-blocks' % program.ops[do_ip].token.loc)
+
+                assert isinstance(program.ops[do_ip].operand, OpAddr)
+                pre_do_ip = program.ops[do_ip].operand
+
+                if program.ops[pre_do_ip].type == OpType.IF:
+                    program.ops[do_ip].operand = ip + 1
+                    stack.append(ip)
+                    ip += 1
+                elif program.ops[pre_do_ip].type == OpType.ELIF:
+                    program.ops[pre_do_ip].operand = ip
+                    program.ops[do_ip].operand = ip + 1
+                    stack.append(ip)
+                    ip += 1
+                else:
+                    sys.exit('%s:%d:%d: ERROR: `elif` can only be used in `do`-blocks that are preceded by an if or `elif`' % token.loc)
+
+
+            elif token.value == Keyword.ELSE:
+                op = Op(OpType.ELSE, token)
+                program.ops.append(op)
+
+                do_ip = stack.pop()
+                if program.ops[do_ip].type != OpType.DO:
+                    sys.exit('%s:%d:%d: ERROR: `else` can only be used in `do`-blocks' % program.ops[do_ip].token.loc)
+
+                assert isinstance(program.ops[do_ip].operand, OpAddr)
+                pre_do_ip = program.ops[do_ip].operand
+                assert isinstance(pre_do_ip, OpAddr)
+                if program.ops[pre_do_ip].type == OpType.IF:
+                    program.ops[do_ip].operand = ip + 1
+                    stack.append(ip)
+                    ip += 1
+                elif program.ops[pre_do_ip].type == OpType.ELIF:
+                    program.ops[pre_do_ip].operand = ip
+                    program.ops[do_ip].operand = ip + 1
+                    stack.append(ip)
+                    ip += 1
+                else:
+                    sys.exit('%s:%d:%d: ERROR: `else` can only be used in `do`-blocks that are preceded by an if or `elif`' % program.ops[do_ip].token.loc)
+
+            elif token.value == Keyword.END:
+                op = Op(OpType.END, token)
+                program.ops.append(op)
+                block_ip = stack.pop()
+
+                if program.ops[block_ip].type == OpType.ELSE:
+                    program.ops[block_ip].operand = ip
+                    program.ops[ip].operand = ip + 1
+                
+                elif program.ops[block_ip].type == OpType.DO:
+                    assert program.ops[block_ip].operand is not None
+                    pre_do_ip = program.ops[block_ip].operand
+
+                    assert isinstance(pre_do_ip, OpAddr)
+                    if program.ops[pre_do_ip].type == OpType.WHILE:
+                        program.ops[ip].operand = pre_do_ip
+                        program.ops[block_ip].operand = ip + 1
+
+                    elif program.ops[pre_do_ip].type == OpType.IF:
+                        program.ops[ip].operand = ip + 1
+                        program.ops[block_ip].operand = ip + 1
+
+                    elif program.ops[pre_do_ip].type == OpType.ELIF:
+                        program.ops[pre_do_ip].operand = ip
+                        program.ops[ip].operand = ip + 1
+                        program.ops[block_ip].operand = ip + 1
+                        
+                    else:
+                        sys.exit('%s:%d:%d: ERROR: `end` can only close do`-blocks that are preceded by an if or `elif` or `while`' % program.ops[do_ip].token.loc)
+                else:
+                        sys.exit('%s:%d:%d: ERROR: `end` can only close `else`, `do` or `macro` blocks for now' % program.ops[do_ip].token.loc)
                 ip += 1
 
             #TODO: add show stack after break
@@ -385,19 +454,25 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                 ip += 1
 
             elif token.value == Keyword.SYSCALL:
+                noOfArgs = rtokens.pop()
+                if noOfArgs.type != TokenType.INT:
+                    sys.exit("%s:%d:%d: ERROR: expected syscall no of args to be %s but found %s" % (token.loc + (readable_enum(TokenType.STR), readable_enum(token.type))))
+                
                 callName = rtokens.pop()
                 if callName.type != TokenType.STR:
-                    sys.exit("%s:%d:%d: ERROR: expected syscall name to be %s but found %s" % (token.loc + (human(TokenType.STR), human(token.type))))
+                    sys.exit("%s:%d:%d: ERROR: expected syscall name to be %s but found %s" % (token.loc + (readable_enum(TokenType.STR), readable_enum(token.type))))
 
-                op = Op(OpType.SYSCALL, token, callName.value)
+                assert isinstance(callName.value, str) and isinstance(noOfArgs.value, int)
+                op = Op(OpType.SYSCALL, token, (callName.value, noOfArgs.value))
                 program.ops.append(op)
                 ip += 1
 
             elif token.value == Keyword.SYSVAL:
                 sysval = rtokens.pop()
                 if sysval.type != TokenType.STR:
-                    sys.exit("%s:%d:%d: ERROR: expected sysval name to be %s but found %s" % (token.loc + (human(TokenType.STR), human(token.type))))
+                    sys.exit("%s:%d:%d: ERROR: expected sysval name to be %s but found %s" % (token.loc + (readable_enum(TokenType.STR), readable_enum(token.type))))
 
+                assert isinstance(sysval.value, str)
                 op = Op(OpType.SYSVAL, token, sysval.value)
                 program.ops.append(op)
                 ip += 1
@@ -408,7 +483,7 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
 
                 token = rtokens.pop()
                 if token.type != TokenType.STR:
-                    sys.exit("%s:%d:%d: ERROR: expected include path to be %s but found %s" % (token.loc + (human(TokenType.STR), human(token.type))))
+                    sys.exit("%s:%d:%d: ERROR: expected include path to be %s but found %s" % (token.loc + (readable_enum(TokenType.STR), readable_enum(token.type))))
 
                 fileIncluded = False
                 for p in includePaths:
@@ -432,9 +507,10 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                 
                 token = rtokens.pop()
                 if token.type != TokenType.WORD:
-                    sys.exit("%s:%d:%d: ERROR: expected memory name to be %s but found %s" % (token.loc + (human(TokenType.WORD), human(token.type))))
+                    sys.exit("%s:%d:%d: ERROR: expected memory name to be %s but found %s" % (token.loc + (readable_enum(TokenType.WORD), readable_enum(token.type))))
                 
-                memory_name = token.value
+                assert isinstance(token.value, str)
+                memory_name : str = token.value
                 if memory_name in macros:
                     assert isinstance(token.value, str)
                     print("%s:%d:%d: ERROR: redefinition of already existing macro `%s`" % (token.loc + (token.value, )))
@@ -458,7 +534,7 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                 token = rtokens.pop()
 
                 if token.type != TokenType.WORD:
-                    sys.exit("%s:%d:%d: ERROR: expected macro name to be %s but found %s" % (token.loc + (human(TokenType.WORD), human(token.type))))
+                    sys.exit("%s:%d:%d: ERROR: expected macro name to be %s but found %s" % (token.loc + (readable_enum(TokenType.WORD), readable_enum(token.type))))
 
                 assert isinstance(token.value, str), "This is probably a bug in the lexer"
                 if token.value in macros:
@@ -478,8 +554,8 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                 nestAmt = 0
                 while len(rtokens) > 0:
                     token = rtokens.pop()
-                    assert len(Keyword) == 11, f"Exaustive handling of keywords with `end` in compile_tokens_to_program for end type starters like Keyword.IF, Keyword.DO {len(Keyword)}"
-                    if token.type == TokenType.KEYWORD and token.value in [Keyword.IF, Keyword.DO]:
+                    assert len(Keyword) == 12, f"Exaustive handling of keywords with `end` in compile_tokens_to_program for end type starters like Keyword.IF, Keyword.DO {len(Keyword)}"
+                    if token.type == TokenType.KEYWORD and token.value in [Keyword.IF, Keyword.WHILE]:
                         nestAmt += 1
 
                     macro.tokens.append(token)
@@ -504,22 +580,324 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
 
     if len(stack) > 0:
         opIdx = stack.pop()
-        sys.exit('%s:%d:%d: ERROR: unclosed block `%s`' % (program.ops[opIdx].token.loc + (human(program.ops[opIdx].type),)))
+        sys.exit('%s:%d:%d: ERROR: unclosed block `%s`' % (program.ops[opIdx].token.loc + (readable_enum(program.ops[opIdx].type),)))
     return program
-
-"""
-Program is a list of Ops
-OP is a dict with the follwing possible fields
-- `type` -- The type of the OpType. One of OpType.PUSH_INT, OpType.IF, OpType.INTRINSIC etc
-- `loc` -- location of the OP in the program it contains (`file_token`,  `row`, `col`)
-- `value` -- Only exists for some OPs like OpType.PUSH_INT and all OpType.INTRINSIC.
-- `jmp` -- It is an optional field and is used for code blocks like if,else, while, end etc. It is created in compile_tokens_to_program
-"""
 
 def load_program(file_path : str ,includePaths : List[str]=[]) -> Program:
     tokens = lex_file(file_path)
     program : Program = compile_tokens_to_program(tokens, includePaths)
     return program
+
+class Type(Enum):
+    INT=auto()
+    PTR=auto()
+    BOOL=auto()
+
+def type_check_program(program : Program):
+    stack : Tuple[Type, Loc] = []
+    assert len(OpType) == 13, "Exhaustive handling of ops in type_check_program"
+    for ip, op in enumerate(program.ops):
+        if op.type == OpType.PUSH_INT:
+            stack.append((Type.INT, op.token.loc))
+        if op.type == OpType.PUSH_STR:
+            stack.append((Type.INT, op.token.loc))
+            stack.append((Type.PTR, op.token.loc))
+        if op.type == OpType.PUSH_MEM:
+            stack.append((Type.PTR, op.token.loc))
+        if op.type == OpType.SYSCALL:
+            callName, no_of_args = op.operand
+            for i in range(no_of_args):
+                stack.pop()
+            stack.append((Type.INT, op.token.loc))
+
+        if op.type == OpType.SYSVAL:
+            stack.append((Type.INT, op.token.loc))
+        if op.type == OpType.IF:
+            assert False, "Not Implemented"
+        if op.type == OpType.ELSE:
+            assert False, "Not Implemented"
+        if op.type == OpType.ELIF:
+            assert False, "Not Implemented"
+        if op.type == OpType.WHILE:
+            assert False, "Not Implemented"
+        if op.type == OpType.DO:
+            assert False, "Not Implemented"
+        if op.type == OpType.END:
+            assert False, "Not Implemented"
+        if op.type == OpType.BREAK:
+            pass
+        if op.type == OpType.INTRINSIC:
+            assert len(Intrinsic) == 26, "Exhaustive handling of Intrinsics in type_check_program"
+                # win32 api operations
+            if op.operand == Intrinsic.STDOUT:
+                if len(stack) < 1:
+                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
+                str_type, str_loc = stack.pop()
+                if str_type != Type.PTR:
+                    sys.exit("%s:%d:%d: Error: Argument for %s Intrinsic has incorrect type %s" % (str_loc + (readable_enum(op.operand), readable_enum(a_type))))
+                
+                stack.append((Type.INT, op.token.loc))
+                
+            if op.operand == Intrinsic.EXIT:
+                return
+
+            if op.operand == Intrinsic.ADD:
+                if len(stack) < 2:
+                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
+                a_type, a_loc = stack.pop()
+                b_type, b_loc = stack.pop()
+                if a_type not in [Type.INT, Type.PTR]:
+                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
+                
+                if b_type not in [Type.INT, Type.PTR]:
+                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
+
+                if a_type == Type.PTR and b_type == Type.PTR:
+                    sys.exit("%s:%d:%d: Error: both argument for %s Intrinsic are type %s which is a incorrect type" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
+
+                if a_type == Type.PTR and b_type == Type.INT or b_type == Type.PTR and a_type == Type.INT:
+                    stack.append((Type.PTR, op.token.loc))
+                else:
+                    stack.append((Type.INT, op.token.loc))
+
+            if op.operand == Intrinsic.SUB:
+                if len(stack) < 2:
+                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
+                a_type, a_loc = stack.pop()
+                b_type, b_loc = stack.pop()
+                if a_type not in [Type.INT, Type.PTR]:
+                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
+                
+                if b_type not in [Type.INT, Type.PTR]:
+                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
+
+                if a_type == Type.PTR and b_type == Type.PTR:
+                    sys.exit("%s:%d:%d: Error: both argument for %s Intrinsic are type %s which is a incorrect type" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
+
+                if a_type == Type.PTR and b_type == Type.INT or b_type == Type.PTR and a_type == Type.INT:
+                    stack.append((Type.PTR, op.token.loc))
+                else:
+                    stack.append((Type.INT, op.token.loc))
+
+            if op.operand == Intrinsic.DIVMOD:
+                if len(stack) < 2:
+                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
+                a_type, a_loc = stack.pop()
+                b_type, b_loc = stack.pop()
+                if a_type != Type.INT:
+                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
+                
+                if b_type != Type.INT:
+                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
+                stack.append((Type.INT, op.token.loc))
+                stack.append((Type.INT, op.token.loc))
+
+            if op.operand == Intrinsic.MUL:
+                if len(stack) < 2:
+                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
+                a_type, a_loc = stack.pop()
+                b_type, b_loc = stack.pop()
+                if a_type != Type.INT:
+                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
+                
+                if b_type != Type.INT:
+                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
+                stack.append((Type.INT, op.token.loc))
+                
+            if op.operand == Intrinsic.EQUAL:
+                if len(stack) < 2:
+                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
+                a_type, a_loc = stack.pop()
+                b_type, b_loc = stack.pop()
+                if a_type not in [Type.INT, Type.PTR]:
+                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
+                
+                if b_type not in [Type.INT, Type.PTR]:
+                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
+                stack.append((Type.BOOL, op.token.loc))
+
+            if op.operand == Intrinsic.NE:
+                if len(stack) < 2:
+                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
+                a_type, a_loc = stack.pop()
+                b_type, b_loc = stack.pop()
+                if a_type not in [Type.INT, Type.PTR]:
+                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
+                
+                if b_type not in [Type.INT, Type.PTR]:
+                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
+                stack.append((Type.BOOL, op.token.loc))
+
+            if op.operand == Intrinsic.GT:
+                if len(stack) < 2:
+                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
+                a_type, a_loc = stack.pop()
+                b_type, b_loc = stack.pop()
+                if a_type not in [Type.INT, Type.PTR]:
+                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
+                
+                if b_type not in [Type.INT, Type.PTR]:
+                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
+                stack.append((Type.BOOL, op.token.loc))
+            if op.operand == Intrinsic.LT:
+                if len(stack) < 2:
+                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
+                a_type, a_loc = stack.pop()
+                b_type, b_loc = stack.pop()
+                if a_type not in [Type.INT, Type.PTR]:
+                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
+                
+                if b_type not in [Type.INT, Type.PTR]:
+                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
+                stack.append((Type.BOOL, op.token.loc))
+            if op.operand == Intrinsic.DROP:
+                if len(stack) < 1:
+                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
+                stack.pop()
+            if op.operand == Intrinsic.DUMP:
+                if len(stack) < 1:
+                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
+
+                a_type, a_loc = stack.pop()
+                if a_type != Type.INT:
+                    sys.exit("%s:%d:%d: Error: Argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
+
+            if op.operand == Intrinsic.DUP:
+                if len(stack) < 1:
+                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
+                a = stack.pop()
+                stack.append(a)
+                stack.append(a)
+
+            if op.operand == Intrinsic.DUP2:
+                if len(stack) < 2:
+                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
+                a = stack.pop()
+                b = stack.pop()
+                stack.append(b)
+                stack.append(a)
+                stack.append(b)
+                stack.append(a)
+
+            if op.operand == Intrinsic.OVER:
+                if len(stack) < 2:
+                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
+                a = stack.pop()
+                b = stack.pop()
+                stack.append(b)
+                stack.append(a)
+                stack.append(b)
+
+            if op.operand == Intrinsic.OVER2:
+                if len(stack) < 3:
+                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
+                a = stack.pop()
+                b = stack.pop()
+                c = stack.pop()
+                stack.append(c)
+                stack.append(b)
+                stack.append(a)
+                stack.append(c)
+
+            if op.operand == Intrinsic.SWAP:
+                if len(stack) < 2:
+                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
+                a = stack.pop()
+                b = stack.pop()
+                stack.append(a)
+                stack.append(b)
+
+            if op.operand == Intrinsic.STORE:
+                if len(stack) < 2:
+                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
+                a_type, a_loc = stack.pop()
+                b_type, b_loc = stack.pop()
+                if a_type != Type.INT:
+                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
+                if b_type != Type.PTR:
+                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(b_type))))
+
+            if op.operand == Intrinsic.LOAD:
+                a_type, a_loc = stack.pop()
+                if a_type != Type.PTR:
+                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
+                stack.append((Type.INT, op.token.loc))
+
+            if op.operand == Intrinsic.STORE32:
+                if len(stack) < 2:
+                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
+                a_type, a_loc = stack.pop()
+                b_type, b_loc = stack.pop()
+                if a_type != Type.INT:
+                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
+                if b_type != Type.PTR:
+                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(b_type))))
+                
+            if op.operand == Intrinsic.LOAD32:
+                a_type, a_loc = stack.pop()
+                if a_type != Type.PTR:
+                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
+                stack.append((Type.INT, op.token.loc))
+        
+            if op.operand == Intrinsic.SHL:
+                if len(stack) < 2:
+                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
+                a_type, a_loc = stack.pop()
+                b_type, b_loc = stack.pop()
+                if a_type != Type.INT:
+                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
+                
+                if b_type != Type.INT:
+                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
+
+                stack.append((Type.INT, op.token.loc))
+
+            if op.operand == Intrinsic.SHR:
+                if len(stack) < 2:
+                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
+                a_type, a_loc = stack.pop()
+                b_type, b_loc = stack.pop()
+                if a_type != Type.INT:
+                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
+                
+                if b_type != Type.INT:
+                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
+                stack.append((Type.INT, op.token.loc))
+            if op.operand == Intrinsic.BAND:
+                if len(stack) < 2:
+                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
+                a_type, a_loc = stack.pop()
+                b_type, b_loc = stack.pop()
+                if a_type != Type.INT:
+                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
+                
+                if b_type != Type.INT:
+                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
+                stack.append((Type.INT, op.token.loc))
+            if op.operand == Intrinsic.BOR:
+                if len(stack) < 2:
+                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
+                a_type, a_loc = stack.pop()
+                b_type, b_loc = stack.pop()
+                if a_type != Type.INT:
+                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
+                
+                if b_type != Type.INT:
+                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
+                stack.append((Type.INT, op.token.loc))
+            if op.operand == Intrinsic.BXOR:
+                if len(stack) < 2:
+                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
+                a_type, a_loc = stack.pop()
+                b_type, b_loc = stack.pop()
+                if a_type != Type.INT:
+                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
+                
+                if b_type != Type.INT:
+                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
+                stack.append((Type.INT, op.token.loc))
+    if len(stack) != 0:
+        sys.exit("Error: unhandled values in the stack at the end of the program")
 
 def compile_program(program : Program, outFilePath : str) -> None:
     with open(outFilePath,"w+") as wf:
@@ -531,7 +909,7 @@ def compile_program(program : Program, outFilePath : str) -> None:
         #add implementation of logic
         for i, op in enumerate(program.ops):
             lt.append(f"addr_{i}:\n")
-            assert len(OpType) == 12, "Exhaustive handling of operations whilst compiling"
+            assert len(OpType) == 13, "Exhaustive handling of operations whilst compiling"
 
             if op.type == OpType.PUSH_INT:
                 valToPush = op.operand
@@ -554,7 +932,7 @@ def compile_program(program : Program, outFilePath : str) -> None:
                 lt.append(f"      push edi\n")
 
             if op.type == OpType.SYSCALL:
-                callName = op.operand
+                callName, _ = op.operand
                 lt.append(f"     ; -- syscall {callName} --\n")
                 lt.append(f"      call {callName}\n")
                 lt.append(f"      push eax\n")
@@ -568,20 +946,23 @@ def compile_program(program : Program, outFilePath : str) -> None:
                 pass
             
             if op.type == OpType.IF:
-                if not op.operand:
-                    sys.exit("%s:%d:%d ERROR: `if` can only be used when an `end` is mentioned" % program.ops[i].token.loc)
-                jmpArg = op.operand
                 lt.append(f" ; -- if --\n")
-                lt.append("      pop eax\n")
-                lt.append("      cmp eax, 1\n")
-                lt.append(f"      jne addr_{jmpArg}\n")
-            
+
             if op.type == OpType.ELSE:
                 if not op.operand:
                     sys.exit("%s:%d:%d ERROR: `else` can only be used when an `end` is mentioned" % program.ops[i].token.loc)
                 jmpArg = op.operand
                 lt.append(f" ; -- else --\n")
                 lt.append(f"      jmp addr_{jmpArg}\n")
+            
+            if op.type == OpType.ELIF:
+                if not op.operand:
+                    print(op.operand)
+                    sys.exit("%s:%d:%d ERROR: `else` can only be used when an `end` is mentioned" % program.ops[i].token.loc)
+                jmpArg = op.operand
+                lt.append(f" ; -- elif --\n")
+                lt.append(f"      jmp addr_{jmpArg}\n")
+            
             
             if op.type == OpType.WHILE:
                 lt.append(f" ; -- while --\n")
@@ -598,13 +979,9 @@ def compile_program(program : Program, outFilePath : str) -> None:
             if op.type == OpType.END:
                 assert isinstance(op.operand, int)
                 jmp_idx = op.operand
-                if program.ops[jmp_idx].type == OpType.WHILE:
-                    lt.append(f"      ;-- endwhile --\n")
-                    lt.append(f"      jmp addr_{jmp_idx}\n")
-                elif program.ops[jmp_idx].type == OpType.IF:
-                    lt.append(f"      ;-- endif --\n")
-                else:
+                if jmp_idx:
                     lt.append(f"      ;-- end --\n")
+                    lt.append(f"      jmp addr_{jmp_idx}\n")
 
             assert len(Intrinsic) == 26, f"Exaustive handling of Intrinsic's in Compiling {len(Intrinsic)}"
             if op.type == OpType.INTRINSIC:
@@ -886,7 +1263,7 @@ def simulate_program(program : Program, argv : List[str]) -> None:
         op = program.ops[i]
         # print(stack)
 
-        assert len(OpType) == 12, f"Exhaustive handling of operations whilst simulating {len(OpType)}"
+        assert len(OpType) == 13, f"Exhaustive handling of operations whilst simulating {len(OpType)}"
         if op.type == OpType.PUSH_INT:
             assert isinstance(op.operand, int)
             valToPush = op.operand
@@ -917,7 +1294,8 @@ def simulate_program(program : Program, argv : List[str]) -> None:
             i += 1
 
         elif op.type == OpType.SYSCALL:
-            if op.operand == "CreateFile":
+            syscall_name, _ = op.operand
+            if syscall_name == "CreateFile":
                 fileNameIdx = stack.pop()
                 stack = stack[:-6]
                 fileName = getStrFromAddr(fileNameIdx, mem)
@@ -925,7 +1303,7 @@ def simulate_program(program : Program, argv : List[str]) -> None:
                 handles.append(open(fileName, "r+"))
                 stack.append(len(handles)-1)
 
-            elif op.operand == "WriteFile":
+            elif syscall_name == "WriteFile":
                 handleIdx = stack.pop()
                 stringIdx = stack.pop()
                 stack = stack[:-3]
@@ -934,7 +1312,7 @@ def simulate_program(program : Program, argv : List[str]) -> None:
                 handle.write(string)
                 stack.append(1)
             
-            elif op.operand == "ReadFile":
+            elif syscall_name == "ReadFile":
                 handleIdx = stack.pop()
                 read_file_store_addr32 = stack.pop()
                 amtToRead = stack.pop()
@@ -948,11 +1326,11 @@ def simulate_program(program : Program, argv : List[str]) -> None:
                     mem[read_file_store_addr32 + j] = ord(text_read[j])
                 stack.append(1)
 
-            elif op.operand == "CloseHandle":
+            elif syscall_name == "CloseHandle":
                 handleIdx = stack.pop()
                 handles[handleIdx].close()
                 stack.append(1)
-            elif op.operand == "SetFilePointer":
+            elif syscall_name == "SetFilePointer":
                 handleIdx = stack.pop()
                 amtToMove = stack.pop()
                 stack.pop()
@@ -969,12 +1347,12 @@ def simulate_program(program : Program, argv : List[str]) -> None:
                 handle = handles[handleIdx]
                 handle.seek(amtToMove, whence)
                 stack.append(1)
-            elif op.operand == "SetEndOfFile":
+            elif syscall_name == "SetEndOfFile":
                 handleIdx = stack.pop()
                 handle = handles[handleIdx]
                 handle.truncate()
                 stack.append(1)
-            elif op.operand == "GetCommandLine":
+            elif syscall_name == "GetCommandLine":
                 bs = bytes("simulated_program " + " ".join(argv), "utf-8")
                 n = len(bs)
                 if i not in str_ptrs:
@@ -999,14 +1377,7 @@ def simulate_program(program : Program, argv : List[str]) -> None:
             i += 1
 
         elif op.type == OpType.IF:
-            a = stack.pop()
-            if not op.operand:
-                sys.exit("%s:%d:%d ERROR: `if` can only be used when an `end` is mentioned" % program.ops[i].token.loc)
-            if a == 0:
-                assert isinstance(op.operand, int)
-                i = op.operand
-            else:
-                i += 1
+            i += 1
 
         elif op.type == OpType.ELSE:
             if not op.operand:
@@ -1014,6 +1385,12 @@ def simulate_program(program : Program, argv : List[str]) -> None:
             assert isinstance(op.operand, int)
             i = op.operand
         
+        elif op.type == OpType.ELIF:
+            if not op.operand:
+                sys.exit("%s:%d:%d ERROR: `elif` can only be used when an `end` is mentioned" % program.ops[i].token.loc)
+            assert isinstance(op.operand, int)
+            i = op.operand
+
         elif op.type == OpType.WHILE:
             i += 1
 
@@ -1198,23 +1575,25 @@ def simulate_program(program : Program, argv : List[str]) -> None:
         if breakpoint:
             print(f"{op.token.text}: {stack}")
             flags = input()
-            for val in flags.split(" "):
-                if val.startswith("s"):
-                    val = val[1:]
+            flagsLst : List[str] = flags.split(" ")
+            for flag in flagsLst:
+                assert isinstance(flag, str)
+                if flag.startswith("s"):
+                    flag = flag[1:]
                     show_strings[0] = not show_strings[0]
-                    if val.isnumeric():
-                        show_strings[1] = int(val)
+                    if flag.isnumeric():
+                        show_strings[1] = int(flag)
                         
-                elif val.startswith("m"):
-                    val = val[1:]
+                elif flag.startswith("m"):
+                    flag = flag[1:]
                     show_mem[0] = not show_mem[0]
-                    if val.isnumeric():
-                        show_mem[1] = int(val)
-                elif val.startswith("a"):
-                    val = val[1:]
+                    if flag.isnumeric():
+                        show_mem[1] = int(flag)
+                elif flag.startswith("a"):
+                    flag = flag[1:]
                     show_args[0] = not show_args[0]
-                    if val.isnumeric():
-                        show_args[1] = int(val)
+                    if flag.isnumeric():
+                        show_args[1] = int(flag)
             if show_strings[0]:
                 print(f"strings: {mem[str_buf_ptr:str_buf_ptr + show_strings[1]]}")
             if show_mem[0]:
@@ -1285,6 +1664,7 @@ def main():
             programBuildTime = time.time()
 
         print("[INFO] loaded program")
+        type_check_program(program)
         simulate_program(program, argv)
         if timed:
             print(f"[TIME] Run Time: {time.time() - programBuildTime} secs")
@@ -1328,6 +1708,7 @@ def main():
             start = time.time()
         program = load_program(programPath, includePaths)
         print("[INFO] loaded program")
+        type_check_program(program)
         compile_program(program,f"{basePath}.asm")
         print(f"[INFO] Generated {basePath}.asm")
         callCmd(["ml","/Fo" ,f"{basePath}.obj", "/c", "/Zd", "/coff", f"{basePath}.asm"])

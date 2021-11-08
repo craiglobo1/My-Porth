@@ -5,7 +5,7 @@ macro % divmod swap drop end
 macro div divmod drop end
 macro mod divmod swap drop end
 
-macro print swap drop stdout end
+macro print stdout drop end
 
 macro !32 store32 end
 macro @32 load32 end
@@ -19,7 +19,7 @@ memory dump_buffer
 end
 macro iprint
     // isNeg (valToPus^0xFFFFFFFF+1) 
-    dup 31 shr 1 = dup if 
+    if dup 31 shr 1 = dup do 
         swap 4294967295 bxor
         1 + 
     else
@@ -37,7 +37,7 @@ macro iprint
         swap
     end drop
 
-    swap if 
+    if swap do
         dup dump_buffer + '-' !8
     else
         1 +
@@ -74,7 +74,7 @@ macro fopen
     0 swap
     sysval "FILE_SHARE_READ OR FILE_SHARE_WRITE" swap
     sysval "GENERIC_READ OR GENERIC_WRITE" swap
-    syscall "CreateFile"
+    syscall 7 "CreateFile"
 end
 
 memory fwrite_fh 4 end
@@ -91,7 +91,7 @@ macro fwrite
     fwrite_strlen @32
     fwrite_str_to_write @32
     fwrite_fh @32
-    syscall "WriteFile" drop
+    syscall 5 "WriteFile" drop
 end
 
 memory fread_fh 4 end
@@ -108,7 +108,7 @@ macro fread
     fread_amt_to_read @32
     fread_buffer @32
     fread_fh @32
-    syscall "ReadFile" drop
+    syscall 5 "ReadFile" drop
 end
 
 memory truncate_fh 4 end
@@ -116,20 +116,25 @@ memory truncate_fh 4 end
 // param: fileHandle
 macro truncate
     truncate_fh swap !32 //fh
-    sysval "FILE_BEGIN" 0 0 truncate_fh @32 syscall "SetFilePointer" drop
-    truncate_fh @32 syscall "SetEndOfFile" drop
+    sysval "FILE_BEGIN"
+    0
+    0
+    truncate_fh @32
+    syscall 4  "SetFilePointer" 
+    drop
+    truncate_fh @32 
+    syscall 1 "SetEndOfFile" drop
 end
 
 // param: fileHandle
 macro fclose
-    syscall "CloseHandle" drop
+    syscall 1 "CloseHandle" drop
 end
-
-// 
 
 memory set_fp_fh 4 end
 memory set_fp_move 4 end
 memory set_fp_amt_to_move 4 end
+// 
 macro set_fp
     set_fp_fh swap !32 
     set_fp_move swap !32 
@@ -138,11 +143,11 @@ macro set_fp
     0
     set_fp_amt_to_move @32
     set_fp_fh @32
-    syscall "SetFilePointer"
+    syscall 4 "SetFilePointer"
 end
 
 macro getArgs
-syscall "GetCommandLine"
+syscall 0 "GetCommandLine"
 end
 
 
