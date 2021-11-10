@@ -3,3 +3,5 @@
 *.asm
 *.bat
 build/
+!ml.exe
+!link.exe
