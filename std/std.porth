@@ -19,7 +19,7 @@ memory dump_buffer
 end
 macro iprint
     // isNeg (valToPus^0xFFFFFFFF+1) 
-    if dup 31 shr 1 = dup do 
+    dup 31 shr 1 = dup if
         swap 4294967295 bxor
         1 + 
     else
@@ -37,7 +37,7 @@ macro iprint
         swap
     end drop
 
-    if swap do
+    swap if
         dup dump_buffer + '-' !8
     else
         1 +
