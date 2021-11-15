@@ -10,7 +10,7 @@ mem BOARD_SIZE 2 - + 1 .
 
 0 while dup BOARD_SIZE  2 - < do
     0 while dup BOARD_SIZE < do
-        dup mem + , if
+        dup mem + , cast(bool) if
             mem BOARD_SIZE + dup '*' .
         else
             mem BOARD_SIZE + dup ' ' .

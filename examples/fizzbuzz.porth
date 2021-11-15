@@ -1,8 +1,8 @@
 include "std.porth"
-// break
+
 1 while dup 100  < do
     dup 15 mod 0 = if
-    "FizzBuzz\n" print
+        "FizzBuzz\n" print
     else dup 3 mod 0 = elif
         "Fizz\n" print
     else dup 5 mod 0 = elif

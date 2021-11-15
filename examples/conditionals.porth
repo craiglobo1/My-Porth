@@ -1,3 +1,13 @@
 include "std.porth"
-34 35 + 70 = dup if dump else 420 dump end
-34 35 + 69 = dup if dump else 420 dump end
+34 35 + 70 = dup if
+    cast(int) dump
+else
+    420 dump drop
+end
+
+34 35 + 69 = dup if
+    cast(int) dump
+else
+    420 dump drop
+end
+

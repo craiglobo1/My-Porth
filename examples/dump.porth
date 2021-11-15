@@ -1,5 +1,3 @@
 include "std.porth"
 
 -12345 iprint
-123653 iprint
-6979 iprint

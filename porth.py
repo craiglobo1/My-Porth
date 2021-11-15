@@ -6,6 +6,7 @@ from os import path, getcwd
 import time
 from dataclasses import dataclass
 from typing import *
+from copy import copy
 
 EXPANSION_LIMIT = 1000
 
@@ -64,6 +65,10 @@ class Intrinsic(Enum):
     BAND = auto()
     BOR = auto()
     BXOR = auto()
+    # cast operations
+    CAST_INT = auto()
+    CAST_BOOL = auto()
+    CAST_PTR = auto()
 
 class OpType(Enum):
     # stack operations
@@ -99,7 +104,7 @@ KEYWORD_NAMES = {
     "end"   :   Keyword.END,
 }
 
-assert len(Intrinsic) == 26 , f"Exhaustive handling in INTRINSIC_WORDS {len(Intrinsic)}"
+assert len(Intrinsic) == 29 , f"Exhaustive handling in INTRINSIC_WORDS {len(Intrinsic)}"
 INTRINSIC_WORDS = {
     "stdout" : Intrinsic.STDOUT,
     "exit"  : Intrinsic.EXIT,
@@ -126,7 +131,10 @@ INTRINSIC_WORDS = {
     "shr"   : Intrinsic.SHR,
     "bor"   : Intrinsic.BOR,
     "band"  : Intrinsic.BAND,
-    "bxor"  : Intrinsic.BXOR
+    "bxor"  : Intrinsic.BXOR,
+    "cast(int)"  : Intrinsic.CAST_INT,
+    "cast(bool)"  : Intrinsic.CAST_BOOL,
+    "cast(ptr)"  : Intrinsic.CAST_PTR
 }
 INTRINSIC_WORDS_TO_INTRINSIC = { val:key for key, val in INTRINSIC_WORDS.items() }
 
@@ -578,61 +586,151 @@ class DataType(Enum):
     PTR=auto()
     BOOL=auto()
 
+DataStack=List[Tuple[DataType, Loc]]
+@dataclass
+class Context:
+    stack : DataStack
+    ip : int
+
+@dataclass
+class Contract:
+    ins : List[DataType]
+    outs : List[DataType]
 def type_check_program(program : Program):
-    stack : List[Tuple[DataType, Loc]] = []
+    visited_dos : Dict[OpAddr, DataStack] = {}
+    contexts : List[Context] = [Context(stack=[], ip=0)]
     assert len(OpType) == 13, "Exhaustive handling of ops in type_check_program"
-    for ip, op in enumerate(program.ops):
+    while len(contexts) > 0:
+        ctx = contexts[-1]
+        if ctx.ip >= len(program.ops):
+            if len(ctx.stack) != 0:
+                compiler_error(ctx.stack[0][1], f"Error: unhandled values in the stack of {[readable_enum(val[0]) for val in ctx.stack]} at the end of the program")
+            contexts.pop()
+            continue
+        op = program.ops[ctx.ip]
         if op.type == OpType.PUSH_INT:
-            stack.append((DataType.INT, op.token.loc))
-        if op.type == OpType.PUSH_STR:
-            stack.append((DataType.INT, op.token.loc))
-            stack.append((DataType.PTR, op.token.loc))
-        if op.type == OpType.PUSH_MEM:
-            stack.append((DataType.PTR, op.token.loc))
-        if op.type == OpType.SYSCALL:
+            ctx.stack.append((DataType.INT, op.token.loc))
+            ctx.ip += 1
+        elif op.type == OpType.PUSH_STR:
+            ctx.stack.append((DataType.INT, op.token.loc))
+            ctx.stack.append((DataType.PTR, op.token.loc))
+            ctx.ip += 1
+        elif op.type == OpType.PUSH_MEM:
+            ctx.stack.append((DataType.PTR, op.token.loc))
+            ctx.ip += 1
+        elif op.type == OpType.SYSCALL:
             assert isinstance(op.operand, SyscallData)
             syscall = op.operand
 
             for i in range(syscall.no_of_args):
-                stack.pop()
-            stack.append((DataType.INT, op.token.loc))
+                ctx.stack.pop()
+            ctx.stack.append((DataType.INT, op.token.loc))
+            ctx.ip += 1
+        elif op.type == OpType.SYSVAL:
+            ctx.stack.append((DataType.INT, op.token.loc))
+            ctx.ip += 1
+        elif op.type == OpType.IF:
+            if len(ctx.stack) < 1:
+                compiler_error(op.token.loc, f"not enough arguments for {readable_enum(op.type)} operand")
+            a_type, a_loc = ctx.stack.pop()
+            if a_type != DataType.BOOL:
+                compiler_error(op.token.loc, f"Argument for {readable_enum(op.type)} operand has incorrect type of {readable_enum(a_type)} expected bool")
+            ctx.ip += 1
+            contexts.append(Context(stack=copy(ctx.stack), ip=op.operand))
+            ctx = contexts[-1]
+        elif op.type == OpType.ELSE:
+            ctx.ip = op.operand
+        elif op.type == OpType.ELIF:
+            if len(ctx.stack) < 1:
+                compiler_error(op.token.loc, f"not enough arguments for {readable_enum(op.type)} operand")
+            a_type, a_loc = ctx.stack.pop()
+            if a_type != DataType.BOOL:
+                compiler_error(op.token.loc, f"Argument for {readable_enum(op.type)} operand has incorrect type of {readable_enum(a_type)} expected bool")
+            ctx.ip += 1
+            contexts.append(Context(stack=copy(ctx.stack), ip=op.operand))
+            ctx = contexts[-1]
+        elif op.type == OpType.WHILE:
+            ctx.ip += 1
+        elif op.type == OpType.DO:
 
-        if op.type == OpType.SYSVAL:
-            stack.append((DataType.INT, op.token.loc))
-        if op.type == OpType.IF:
-            assert False, "Not Implemented"
-        if op.type == OpType.ELSE:
-            assert False, "Not Implemented"
-        if op.type == OpType.ELIF:
-            assert False, "Not Implemented"
-        if op.type == OpType.WHILE:
-            assert False, "Not Implemented"
-        if op.type == OpType.DO:
-            assert False, "Not Implemented"
-        if op.type == OpType.END:
-            assert False, "Not Implemented"
-        if op.type == OpType.BREAK:
-            pass
-        if op.type == OpType.INTRINSIC:
-            assert len(Intrinsic) == 26, "Exhaustive handling of Intrinsics in type_check_program"
+            if len(ctx.stack) < 1:
+                compiler_error(op.token.loc, f"not enough arguments for {readable_enum(op.type)} operand")
+            
+            a_type, a_loc = ctx.stack.pop()
+            if a_type != DataType.BOOL:
+                compiler_error(op.token.loc, f"Argument for {readable_enum(op.type)} operand has incorrect type of {readable_enum(a_type)} expected bool")
+
+            if ctx.ip in visited_dos:
+                expected_types = list(map(lambda x: x[0], visited_dos[ctx.ip]))
+                actual_types = list(map(lambda x: x[0], ctx.stack))
+                if expected_types != actual_types:
+                    compiler_error(op.token.loc, 'Loops are not allowed to alter types and amount of elements on the stack between iterations!', exits=False)
+                    compiler_note(op.token.loc, '-- Stack BEFORE a single iteration --', exits=False)
+
+                    if len(visited_dos[ctx.ip]) == 0:
+                        compiler_note(op.token.loc, '<empty>', exits=False)
+                    else:
+                        for typ, loc in visited_dos[ctx.ip]:
+                            compiler_note(loc, readable_enum(typ), exits=False)
+                    compiler_note(op.token.loc, '-- Stack AFTER a single iteration --', exits=False)
+                    if len(ctx.stack) == 0:
+                        compiler_note(op.token.loc, '<empty>', exits=False)
+                    else:
+                        for typ, loc in ctx.stack:
+                            compiler_note(loc, readable_enum(typ), exits=False)
+                    exit(1)
+                else:
+                    contexts.pop()
+            else:
+                visited_dos[ctx.ip] = copy(ctx.stack)
+                ctx.ip += 1
+                contexts.append(Context(stack=copy(ctx.stack), ip=op.operand))
+                ctx = contexts[-1]
+
+        elif op.type == OpType.END:
+            assert isinstance(op.operand, OpAddr)
+            ctx.ip = op.operand
+        elif op.type == OpType.BREAK:
+            ctx.ip += 1
+        elif op.type == OpType.INTRINSIC:
+            assert len(Intrinsic) == 29, "Exhaustive handling of Intrinsics in type_check_program"
                 # win32 api operations
             if op.operand == Intrinsic.STDOUT:
-                if len(stack) < 1:
-                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                str_type, str_loc = stack.pop()
+                if len(ctx.stack) < 1:
+                    compiler_error(op.token.loc, f"not enough arguments for {readable_enum(op.operand)} Intrinsic")
+                str_type, str_loc = ctx.stack.pop()
                 if str_type != DataType.PTR:
                     sys.exit("%s:%d:%d: Error: Argument for %s Intrinsic has incorrect type %s" % (str_loc + (readable_enum(op.operand), readable_enum(str_type))))
                 
-                stack.append((DataType.INT, op.token.loc))
-                
-            if op.operand == Intrinsic.EXIT:
+                # ctx.stack.append((DataType.INT, op.token.loc))
+                ctx.ip += 1
+            
+            elif op.operand == Intrinsic.CAST_INT:
+                if len(ctx.stack) < 1:
+                    compiler_error(op.token.loc, f"not enough arguments for {readable_enum(op.operand)} Intrinsic")
+                a_type, a_loc = ctx.stack.pop()
+                ctx.stack.append((DataType.INT, a_loc))
+                ctx.ip += 1
+            elif op.operand == Intrinsic.CAST_BOOL:
+                if len(ctx.stack) < 1:
+                    compiler_error(op.token.loc, f"not enough arguments for {readable_enum(op.operand)} Intrinsic")
+                a_type, a_loc = ctx.stack.pop()
+                ctx.stack.append((DataType.BOOL, a_loc))            
+                ctx.ip += 1
+            elif op.operand == Intrinsic.CAST_PTR:
+                if len(ctx.stack) < 1:
+                    compiler_error(op.token.loc, f"not enough arguments for {readable_enum(op.operand)} Intrinsic")
+                a_type, a_loc = ctx.stack.pop()
+                ctx.stack.append((DataType.PTR, a_loc))
+                ctx.ip += 1
+            elif op.operand == Intrinsic.EXIT:
                 return
 
-            if op.operand == Intrinsic.ADD:
-                if len(stack) < 2:
+            elif op.operand == Intrinsic.ADD:
+                if len(ctx.stack) < 2:
                     sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = stack.pop()
-                b_type, b_loc = stack.pop()
+                a_type, a_loc = ctx.stack.pop()
+                b_type, b_loc = ctx.stack.pop()
                 if a_type not in [DataType.INT, DataType.PTR]:
                     sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
                 
@@ -643,15 +741,15 @@ def type_check_program(program : Program):
                     sys.exit("%s:%d:%d: Error: both argument for %s Intrinsic are type %s which is a incorrect type" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
 
                 if a_type == DataType.PTR and b_type == DataType.INT or b_type == DataType.PTR and a_type == DataType.INT:
-                    stack.append((DataType.PTR, op.token.loc))
+                    ctx.stack.append((DataType.PTR, op.token.loc))
                 else:
-                    stack.append((DataType.INT, op.token.loc))
-
-            if op.operand == Intrinsic.SUB:
-                if len(stack) < 2:
+                    ctx.stack.append((DataType.INT, op.token.loc))
+                ctx.ip += 1
+            elif op.operand == Intrinsic.SUB:
+                if len(ctx.stack) < 2:
                     sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = stack.pop()
-                b_type, b_loc = stack.pop()
+                a_type, a_loc = ctx.stack.pop()
+                b_type, b_loc = ctx.stack.pop()
                 if a_type not in [DataType.INT, DataType.PTR]:
                     sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
                 
@@ -662,229 +760,239 @@ def type_check_program(program : Program):
                     sys.exit("%s:%d:%d: Error: both argument for %s Intrinsic are type %s which is a incorrect type" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
 
                 if a_type == DataType.PTR and b_type == DataType.INT or b_type == DataType.PTR and a_type == DataType.INT:
-                    stack.append((DataType.PTR, op.token.loc))
+                    ctx.stack.append((DataType.PTR, op.token.loc))
                 else:
-                    stack.append((DataType.INT, op.token.loc))
+                    ctx.stack.append((DataType.INT, op.token.loc))
+                ctx.ip += 1
 
-            if op.operand == Intrinsic.DIVMOD:
-                if len(stack) < 2:
+            elif op.operand == Intrinsic.DIVMOD:
+                if len(ctx.stack) < 2:
                     sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = stack.pop()
-                b_type, b_loc = stack.pop()
+                a_type, a_loc = ctx.stack.pop()
+                b_type, b_loc = ctx.stack.pop()
                 if a_type != DataType.INT:
                     sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
                 
                 if b_type != DataType.INT:
                     sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
-                stack.append((DataType.INT, op.token.loc))
-                stack.append((DataType.INT, op.token.loc))
+                ctx.stack.append((DataType.INT, op.token.loc))
+                ctx.stack.append((DataType.INT, op.token.loc))
+                ctx.ip += 1
 
-            if op.operand == Intrinsic.MUL:
-                if len(stack) < 2:
+            elif op.operand == Intrinsic.MUL:
+                if len(ctx.stack) < 2:
                     sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = stack.pop()
-                b_type, b_loc = stack.pop()
+                a_type, a_loc = ctx.stack.pop()
+                b_type, b_loc = ctx.stack.pop()
                 if a_type != DataType.INT:
                     sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
                 
                 if b_type != DataType.INT:
                     sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
-                stack.append((DataType.INT, op.token.loc))
+                ctx.stack.append((DataType.INT, op.token.loc))
+                ctx.ip += 1
                 
-            if op.operand == Intrinsic.EQUAL:
-                if len(stack) < 2:
+            elif op.operand == Intrinsic.EQUAL:
+                if len(ctx.stack) < 2:
                     sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = stack.pop()
-                b_type, b_loc = stack.pop()
+                a_type, a_loc = ctx.stack.pop()
+                b_type, b_loc = ctx.stack.pop()
                 if a_type not in [DataType.INT, DataType.PTR]:
                     sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
                 
                 if b_type not in [DataType.INT, DataType.PTR]:
                     sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
-                stack.append((DataType.BOOL, op.token.loc))
+                ctx.stack.append((DataType.BOOL, op.token.loc))
+                ctx.ip += 1
 
-            if op.operand == Intrinsic.NE:
-                if len(stack) < 2:
+            elif op.operand == Intrinsic.NE:
+                if len(ctx.stack) < 2:
                     sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = stack.pop()
-                b_type, b_loc = stack.pop()
+                a_type, a_loc = ctx.stack.pop()
+                b_type, b_loc = ctx.stack.pop()
                 if a_type not in [DataType.INT, DataType.PTR]:
                     sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
                 
                 if b_type not in [DataType.INT, DataType.PTR]:
                     sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
-                stack.append((DataType.BOOL, op.token.loc))
+                ctx.stack.append((DataType.BOOL, op.token.loc))
+                ctx.ip += 1
+            elif op.operand == Intrinsic.GT:
+                if len(ctx.stack) < 2:
+                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
+                a_type, a_loc = ctx.stack.pop()
+                b_type, b_loc = ctx.stack.pop()
+                if a_type not in [DataType.INT, DataType.PTR]:
+                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
+                
+                if b_type not in [DataType.INT, DataType.PTR]:
+                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
+                ctx.stack.append((DataType.BOOL, op.token.loc))
+                ctx.ip += 1
+            elif op.operand == Intrinsic.LT:
+                if len(ctx.stack) < 2:
+                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
+                a_type, a_loc = ctx.stack.pop()
+                b_type, b_loc = ctx.stack.pop()
+                if a_type not in [DataType.INT, DataType.PTR]:
+                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
+                
+                if b_type not in [DataType.INT, DataType.PTR]:
+                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
+                ctx.ip += 1
+                ctx.stack.append((DataType.BOOL, op.token.loc))
+            elif op.operand == Intrinsic.DROP:
+                if len(ctx.stack) < 1:
+                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
+                ctx.stack.pop()
+                ctx.ip += 1
+            elif op.operand == Intrinsic.DUMP:
+                if len(ctx.stack) < 1:
+                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
 
-            if op.operand == Intrinsic.GT:
-                if len(stack) < 2:
-                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = stack.pop()
-                b_type, b_loc = stack.pop()
-                if a_type not in [DataType.INT, DataType.PTR]:
-                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
-                
-                if b_type not in [DataType.INT, DataType.PTR]:
-                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
-                stack.append((DataType.BOOL, op.token.loc))
-            if op.operand == Intrinsic.LT:
-                if len(stack) < 2:
-                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = stack.pop()
-                b_type, b_loc = stack.pop()
-                if a_type not in [DataType.INT, DataType.PTR]:
-                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
-                
-                if b_type not in [DataType.INT, DataType.PTR]:
-                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
-                stack.append((DataType.BOOL, op.token.loc))
-            if op.operand == Intrinsic.DROP:
-                if len(stack) < 1:
-                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                stack.pop()
-            if op.operand == Intrinsic.DUMP:
-                if len(stack) < 1:
-                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-
-                a_type, a_loc = stack.pop()
+                a_type, a_loc = ctx.stack.pop()
                 if a_type != DataType.INT:
                     sys.exit("%s:%d:%d: Error: Argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
-
-            if op.operand == Intrinsic.DUP:
-                if len(stack) < 1:
+                ctx.ip += 1
+            elif op.operand == Intrinsic.DUP:
+                if len(ctx.stack) < 1:
                     sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a = stack.pop()
-                stack.append(a)
-                stack.append(a)
+                a_type, a_loc = ctx.stack.pop()
+                ctx.stack.append((a_type, a_loc))
+                ctx.stack.append((a_type, op.token.loc))
+                ctx.ip += 1
 
-            if op.operand == Intrinsic.DUP2:
-                if len(stack) < 2:
+            elif op.operand == Intrinsic.DUP2:
+                if len(ctx.stack) < 2:
                     sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a = stack.pop()
-                b = stack.pop()
-                stack.append(b)
-                stack.append(a)
-                stack.append(b)
-                stack.append(a)
-
-            if op.operand == Intrinsic.OVER:
-                if len(stack) < 2:
+                a_type, a_loc  = ctx.stack.pop()
+                b_type, b_loc = ctx.stack.pop()
+                ctx.stack.append((b_type, b_loc))
+                ctx.stack.append((a_type, a_loc))
+                ctx.stack.append((b_type, op.token.loc))
+                ctx.stack.append((a_type, op.token.loc))
+                ctx.ip += 1
+            elif op.operand == Intrinsic.OVER:
+                if len(ctx.stack) < 2:
                     sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a = stack.pop()
-                b = stack.pop()
-                stack.append(b)
-                stack.append(a)
-                stack.append(b)
-
-            if op.operand == Intrinsic.OVER2:
-                if len(stack) < 3:
+                a = ctx.stack.pop()
+                b_type, b_loc = ctx.stack.pop()
+                ctx.stack.append((b_type, b_loc))
+                ctx.stack.append(a)
+                ctx.stack.append((b_type, op.token.loc))
+                ctx.ip += 1
+            elif op.operand == Intrinsic.OVER2:
+                if len(ctx.stack) < 3:
                     sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a = stack.pop()
-                b = stack.pop()
-                c = stack.pop()
-                stack.append(c)
-                stack.append(b)
-                stack.append(a)
-                stack.append(c)
-
-            if op.operand == Intrinsic.SWAP:
-                if len(stack) < 2:
+                a = ctx.stack.pop()
+                b = ctx.stack.pop()
+                c = ctx.stack.pop()
+                ctx.stack.append(c)
+                ctx.stack.append(b)
+                ctx.stack.append(a)
+                ctx.stack.append(c)
+                ctx.ip += 1
+            elif op.operand == Intrinsic.SWAP:
+                if len(ctx.stack) < 2:
                     sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a = stack.pop()
-                b = stack.pop()
-                stack.append(a)
-                stack.append(b)
-
-            if op.operand == Intrinsic.STORE:
-                if len(stack) < 2:
+                a = ctx.stack.pop()
+                b = ctx.stack.pop()
+                ctx.stack.append(a)
+                ctx.stack.append(b)
+                ctx.ip += 1
+            elif op.operand == Intrinsic.STORE:
+                if len(ctx.stack) < 2:
                     sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = stack.pop()
-                b_type, b_loc = stack.pop()
+                a_type, a_loc = ctx.stack.pop()
+                b_type, b_loc = ctx.stack.pop()
                 if a_type != DataType.INT:
                     sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
                 if b_type != DataType.PTR:
                     sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(b_type))))
-
-            if op.operand == Intrinsic.LOAD:
-                a_type, a_loc = stack.pop()
+                ctx.ip += 1
+            elif op.operand == Intrinsic.LOAD:
+                a_type, a_loc = ctx.stack.pop()
                 if a_type != DataType.PTR:
                     sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
-                stack.append((DataType.INT, op.token.loc))
-
-            if op.operand == Intrinsic.STORE32:
-                if len(stack) < 2:
+                ctx.stack.append((DataType.INT, op.token.loc))
+                ctx.ip += 1
+            elif op.operand == Intrinsic.STORE32:
+                if len(ctx.stack) < 2:
                     sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = stack.pop()
-                b_type, b_loc = stack.pop()
+                a_type, a_loc = ctx.stack.pop()
+                b_type, b_loc = ctx.stack.pop()
                 if a_type != DataType.INT:
                     sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
                 if b_type != DataType.PTR:
                     sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(b_type))))
-                
-            if op.operand == Intrinsic.LOAD32:
-                a_type, a_loc = stack.pop()
+                ctx.ip += 1  
+            elif op.operand == Intrinsic.LOAD32:
+                a_type, a_loc = ctx.stack.pop()
                 if a_type != DataType.PTR:
                     sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
-                stack.append((DataType.INT, op.token.loc))
-        
-            if op.operand == Intrinsic.SHL:
-                if len(stack) < 2:
+                ctx.stack.append((DataType.INT, op.token.loc))
+                ctx.ip += 1
+            elif op.operand == Intrinsic.SHL:
+                if len(ctx.stack) < 2:
                     sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = stack.pop()
-                b_type, b_loc = stack.pop()
+                a_type, a_loc = ctx.stack.pop()
+                b_type, b_loc = ctx.stack.pop()
                 if a_type != DataType.INT:
                     sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
                 
                 if b_type != DataType.INT:
                     sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
 
-                stack.append((DataType.INT, op.token.loc))
-
-            if op.operand == Intrinsic.SHR:
-                if len(stack) < 2:
+                ctx.stack.append((DataType.INT, op.token.loc))
+                ctx.ip += 1
+            elif op.operand == Intrinsic.SHR:
+                if len(ctx.stack) < 2:
                     sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = stack.pop()
-                b_type, b_loc = stack.pop()
+                a_type, a_loc = ctx.stack.pop()
+                b_type, b_loc = ctx.stack.pop()
                 if a_type != DataType.INT:
                     sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
                 
                 if b_type != DataType.INT:
                     sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
-                stack.append((DataType.INT, op.token.loc))
-            if op.operand == Intrinsic.BAND:
-                if len(stack) < 2:
+                ctx.stack.append((DataType.INT, op.token.loc))
+                ctx.ip += 1
+            elif op.operand == Intrinsic.BAND:
+                if len(ctx.stack) < 2:
                     sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = stack.pop()
-                b_type, b_loc = stack.pop()
+                a_type, a_loc = ctx.stack.pop()
+                b_type, b_loc = ctx.stack.pop()
                 if a_type != DataType.INT:
                     sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
                 
                 if b_type != DataType.INT:
                     sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
-                stack.append((DataType.INT, op.token.loc))
-            if op.operand == Intrinsic.BOR:
-                if len(stack) < 2:
+                ctx.stack.append((DataType.INT, op.token.loc))
+                ctx.ip += 1
+            elif op.operand == Intrinsic.BOR:
+                if len(ctx.stack) < 2:
                     sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = stack.pop()
-                b_type, b_loc = stack.pop()
+                a_type, a_loc = ctx.stack.pop()
+                b_type, b_loc = ctx.stack.pop()
                 if a_type != DataType.INT:
                     sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
                 
                 if b_type != DataType.INT:
                     sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
-                stack.append((DataType.INT, op.token.loc))
-            if op.operand == Intrinsic.BXOR:
-                if len(stack) < 2:
+                ctx.stack.append((DataType.INT, op.token.loc))
+                ctx.ip += 1
+            elif op.operand == Intrinsic.BXOR:
+                if len(ctx.stack) < 2:
                     sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = stack.pop()
-                b_type, b_loc = stack.pop()
+                a_type, a_loc = ctx.stack.pop()
+                b_type, b_loc = ctx.stack.pop()
                 if a_type != DataType.INT:
                     sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
                 
                 if b_type != DataType.INT:
                     sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
-                stack.append((DataType.INT, op.token.loc))
-    if len(stack) != 0:
-        sys.exit("Error: unhandled values in the stack at the end of the program")
+                ctx.stack.append((DataType.INT, op.token.loc))
+        # compiler_diagnostic(op.token.loc,"", f"ctx:{len(contexts)-1} `{op.token.text}` ip:{ctx.ip} type check: {[ readable_enum(val[0]) for val in ctx.stack]} {readable_enum(op.type)} {readable_enum(op.operand)}",exits=False)
 
 def compile_program(program : Program, outFilePath : str) -> None:
     with open(outFilePath,"w+") as wf:
@@ -966,13 +1074,16 @@ def compile_program(program : Program, outFilePath : str) -> None:
                     lt.append(f"      ;-- end --\n")
                     lt.append(f"      jmp addr_{jmp_idx}\n")
 
-            assert len(Intrinsic) == 26, f"Exaustive handling of Intrinsic's in Compiling {len(Intrinsic)}"
+            assert len(Intrinsic) == 29, f"Exaustive handling of Intrinsic's in Compiling {len(Intrinsic)}"
             if op.type == OpType.INTRINSIC:
 
                 if op.operand == Intrinsic.STDOUT:
                     lt.append("      ;-- print --\n")
                     lt.append("      pop eax\n")
                     lt.append("      invoke StdOut, addr [eax]\n")
+                
+                elif op.operand in [Intrinsic.CAST_INT, Intrinsic.CAST_BOOL, Intrinsic.CAST_PTR]:
+                    pass
 
                 elif op.operand == Intrinsic.EXIT:
                     lt.append("     ; -- exit --\n")
@@ -1683,12 +1794,13 @@ def main():
                 basePath = path.join(baseDir,programName)
             else:
                 usage(compilerPath)
-                print("[ERROR] Invalid Path entered")
+                print(f"[ERROR] Invalid Path {baseDir} entered")
+                exit(1)
         if timed:
             start = time.time()
         program = load_program(programPath, includePaths)
         print("[INFO] loaded program")
-        # type_check_program(program)
+        type_check_program(program)
         compile_program(program,f"{basePath}.asm")
         print(f"[INFO] Generated {basePath}.asm")
         callCmd(["ml.exe","/Fo" ,f"{basePath}.obj", "/c", "/Zd", "/coff", f"{basePath}.asm"])
