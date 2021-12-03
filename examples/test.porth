@@ -1,3 +1,5 @@
+proc sum_of_3
+    +
+end
 
-
-3 +
+3 5 sum_of_3 dump

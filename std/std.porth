@@ -13,37 +13,6 @@ macro @32 load32 end
 macro !8 store8 end
 macro @8 load8 end
 
-
-memory dump_buffer
-    12
-end
-macro iprint
-    dup 31 shr 1 = dup if
-        swap 4294967295 bxor
-        1 + 
-    else
-        swap
-    end
-    
-    11 swap
-
-    dump_buffer 12 + '\n' !8
-    while dup 0 != do
-        10 divmod '0' +
-        2over dump_buffer  +
-        swap !8
-        swap 1 -
-        swap
-    end drop
-
-    swap if
-        dup dump_buffer + '-' !8
-    else
-        1 +
-    end
-    dump_buffer + stdout
-end
-
 memory memcpy_size 4 end
 memory memcpy_src 4 end
 memory memcpy_dst 4 end

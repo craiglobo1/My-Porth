@@ -1,0 +1,15 @@
+include "std.porth"
+
+proc hello in
+    "hello\n" print
+end
+
+proc world in
+    hello
+    "world\n" print
+end
+
+proc number -- int in
+    23 5 +
+end
+world
