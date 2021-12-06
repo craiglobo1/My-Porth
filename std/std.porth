@@ -1,9 +1,5 @@
-
-macro / divmod drop end
-macro % divmod swap drop end
-
-macro div divmod drop end
-macro mod divmod swap drop end
+proc _div int int -- int in divmod drop end
+proc _mod int int -- int in divmod swap drop end
 
 macro print stdout drop end
 
@@ -12,6 +8,10 @@ macro load32 @32 end
 
 macro store8 !8 end
 macro load8 @8 end
+
+macro cast(int) <int> end
+macro cast(ptr) <ptr> end
+macro cast(bool) <bool> end
 
 macro sizeof(i32) 4 end
 macro sizeof(ptr) 4 end
@@ -22,8 +22,10 @@ memory dump_buffer
     12
 end
 
+
 proc dump int in
     dup 0 != if
+        
         dup 31 shr 1 = dup if
             swap 4294967295 bxor
             1 + 
@@ -31,31 +33,48 @@ proc dump int in
             swap
         end
         
-        11 swap
+        '\n' dump_buffer <int> 11 + <ptr> !8
 
-        '\n' dump_buffer cast(int) 12 + cast(ptr) !8
+        10 swap
         while dup 0 != do
-            10 divmod '0' +
-            2over dump_buffer cast(int) + cast(ptr) !8
+            10 divmod '0' + 
+            2over dump_buffer <int> + <ptr> !8
             swap 1 -
             swap
         end drop
 
         swap if
-            dup '-' dump_buffer cast(int) + cast(ptr) !8
+            dup dump_buffer <int> + <ptr> '-' swap !8
         else
             1 +
         end
-        dump_buffer cast(int) + cast(ptr) stdout
+        dump_buffer <int> + <ptr> stdout
     else
         "0\n" stdout drop
     end
 end
 
 proc strlen ptr -- int in
-    0 while over cast(int) over + cast(ptr) @8 0 != do
+    0 while over <int> over + <ptr> @8 0 != do
     1 +
     end swap drop
+end
+
+memory free_size 4 end
+memory free_mem 4 end
+
+proc free int ptr in
+    <int> free_mem !32
+    free_size !32
+    free_size @32 4 _div while dup 0 > do
+        0 over 1 - 4 * free_mem @32 + <ptr> !32
+        1 -
+    end drop
+    // i
+    free_size @32 4 _mod while dup 0 > do
+        free_size @32 over - free_mem @32 + <ptr> 0 swap !8
+        1 -
+    end drop
 end
 
 memory memcpy_size 4 end
@@ -65,15 +84,15 @@ memory memcpy_dst 4 end
 
 //param: &dst size &src
 proc memcpy ptr int ptr in
-    cast(int) memcpy_dst  !32
-    cast(int) memcpy_size !32
-    cast(int) memcpy_src  !32
+    <int> memcpy_dst  !32
+    <int> memcpy_size !32
+    <int> memcpy_src  !32
 
     memcpy_dst @32
 
     0 while dup memcpy_size @32 < do
-        dup memcpy_src @32 + cast(ptr) @8
-        over memcpy_dst @32 + cast(ptr) !8
+        dup memcpy_src @32 + <ptr> @8
+        over memcpy_dst @32 + <ptr> !8
         1 +
     end drop drop
 end
@@ -87,15 +106,15 @@ end
 
 
 proc isNumericChar ptr -- bool in
-    dup cast(int) '0' 1 - > cast(int) over cast(int) '9' 1 + < cast(int) band swap drop cast(bool)
+    dup <int> '0' 1 - > <int> over <int> '9' 1 + < <int> band swap drop <bool>
 end
 
 
 proc _not bool -- bool in
     if 
-        0 cast(bool)
+        0 <bool>
     else
-        1 cast(bool)
+        1 <bool>
     end
 end
 
@@ -120,9 +139,9 @@ memory str_to_int_s1_len  4 end
 // ptr ptr
 proc str_to_int ptr -- int in
     dup strlen 1 - str_to_int_s1_len !32
-    cast(int) str_to_int_s1 !32
+    <int> str_to_int_s1 !32
     str_to_int_s1_len @32 while dup -1 > do
-        dup str_to_int_s1 @32 + cast(ptr) @8 '0' -
+        dup str_to_int_s1 @32 + <ptr> @8 '0' -
         over str_to_int_s1_len @32 swap - 10 swap pow *
         str_to_int_no1 @32 + str_to_int_no1 !32
     1 -
@@ -150,7 +169,7 @@ memory fwrite_strlen 4 end
 proc fwrite ptr int int in
     fwrite_fh !32
     fwrite_strlen !32
-    cast(int) fwrite_str_to_write !32
+    <int> fwrite_str_to_write !32
     0
     0
     fwrite_strlen @32
@@ -167,7 +186,7 @@ memory fread_lpBuffer 4 end
 // param: amtToRead, buffer, fileHandle
 proc fread int ptr int -- int in
               fread_fh          !32
-    cast(int) fread_buffer      !32
+    <int> fread_buffer      !32
               fread_amt_to_read !32
     0
     fread_lpBuffer
@@ -184,10 +203,10 @@ memory readLine_fh 4 end
 
 proc readLine ptr int in
     readLine_fh !32
-    cast(int) readLine_line_buffer_ptr !32
+    <int> readLine_line_buffer_ptr !32
     0 while readLine_cur_char @8 '\n' != do
         1 readLine_cur_char readLine_fh @32 fread drop
-        dup readLine_line_buffer_ptr @32 + readLine_cur_char @8 swap cast(ptr) !8
+        dup readLine_line_buffer_ptr @32 + readLine_cur_char @8 swap <ptr> !8
         1 +
     end drop
     0 readLine_cur_char !8
@@ -239,3 +258,4 @@ macro ,32 load32 end
 
 macro . store8 end
 macro , load8 end
+

@@ -2,15 +2,18 @@ include "std.porth"
 
 memory fh 4 end
 
-"test_read.txt" fopen
-fh !32
+// "test_read.txt" fopen
+// fh !32
 
-memory line_buffer 50 end
+// memory line_buffer 50 end
 
-0 while dup 31 < do 
-    line_buffer fh @32 readLine
-    line_buffer stdout
-    1 +
-end drop
+// 0 while dup 31 < do 
+//     line_buffer fh @32 readLine
+//     line_buffer stdout
+//     1 +
+// end drop
 
-fh @32 fclose
+// fh @32 fclose
+
+// mem size%4 size/4 mem size/4
+

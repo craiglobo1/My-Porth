@@ -32,6 +32,7 @@ class Keyword(Enum):
     SYSCALL = auto()
     SYSVAL = auto()
     BREAK = auto()
+    TYPE_BREAK = auto()
     END = auto()
     IN= auto()
     DASHDASH = auto()
@@ -91,12 +92,13 @@ class OpType(Enum):
     DO = auto()
     END = auto()
     BREAK = auto()
+    TYPE_BREAK = auto()
     INTRINSIC = auto()
     SKIP_PROC=auto()
     RET=auto()
     CALL=auto()
 
-assert len(Keyword) == 15, f"Exhaustive handling in KEYWORD NAMES {len(Keyword)}"
+assert len(Keyword) == 16, f"Exhaustive handling in KEYWORD NAMES {len(Keyword)}"
 KEYWORD_NAMES = {
     "if"    :   Keyword.IF,
     "else"  :   Keyword.ELSE,
@@ -109,7 +111,9 @@ KEYWORD_NAMES = {
     "include":  Keyword.INCLUDE,
     "syscall":  Keyword.SYSCALL,
     "sysval":  Keyword.SYSVAL,
+    # TODO: add break for typechecking
     "break":  Keyword.BREAK,
+    "tbreak":  Keyword.TYPE_BREAK,
     "end"   :   Keyword.END,
     "in"   :   Keyword.IN,
     "--"   :   Keyword.DASHDASH,
@@ -144,9 +148,9 @@ INTRINSIC_WORDS = {
     "bor"   : Intrinsic.BOR,
     "band"  : Intrinsic.BAND,
     "bxor"  : Intrinsic.BXOR,
-    "cast(int)"  : Intrinsic.CAST_INT,
-    "cast(bool)"  : Intrinsic.CAST_BOOL,
-    "cast(ptr)"  : Intrinsic.CAST_PTR
+    "<int>"  : Intrinsic.CAST_INT,
+    "<bool>"  : Intrinsic.CAST_BOOL,
+    "<ptr>"  : Intrinsic.CAST_PTR
 }
 INTRINSIC_WORDS_TO_INTRINSIC = { val:key for key, val in INTRINSIC_WORDS.items() }
 
@@ -230,6 +234,7 @@ def lex_lines(file_path : str, lines : List[str]) -> Generator[Token, None, None
         while col < len(line) and not comment:
             loc = (file_path, row + 1, col + 1)
 
+            # TODO: Add support for binary and hexadecimal numbers
             if line[col] == '"':
                 col_end = find_col(line, col+1, lambda x: not x == '"')
                 if col_end >= len(line) or line[col_end] != '"':
@@ -393,7 +398,7 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
             ip += 1
 
         elif token.type == TokenType.KEYWORD:
-            assert len(Keyword) == 15, "Exhaustive ops handling in compile_tokens_to_program. Only ops that form blocks must be handled"
+            assert len(Keyword) == 16, "Exhaustive ops handling in compile_tokens_to_program. Only ops that form blocks must be handled"
 
 
             if token.value == Keyword.WHILE:
@@ -504,6 +509,11 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
             #TODO: add show stack after break
             elif token.value == Keyword.BREAK:
                 op = Op(OpType.BREAK, token)
+                program.ops.append(op)
+                ip += 1
+            
+            elif token.value == Keyword.TYPE_BREAK:
+                op = Op(OpType.TYPE_BREAK, token)
                 program.ops.append(op)
                 ip += 1
 
@@ -631,7 +641,7 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                 nestAmt = 0
                 while len(rtokens) > 0:
                     token = rtokens.pop()
-                    assert len(Keyword) == 15, f"Exaustive handling of keywords with `end` in compile_tokens_to_program for end type starters like Keyword.IF, Keyword.DO {len(Keyword)}"
+                    assert len(Keyword) == 16, f"Exaustive handling of keywords with `end` in compile_tokens_to_program for end type starters like Keyword.IF, Keyword.DO {len(Keyword)}"
                     if token.type == TokenType.KEYWORD and token.value in [Keyword.IF, Keyword.WHILE, Keyword.PROC, Keyword.MEMORY, Keyword.MACRO]:
                         nestAmt += 1
 
@@ -713,7 +723,7 @@ def type_check_program(program : Program):
     for proc in program.procs:
         contexts.append(Context(stack=copy(proc.contract.ins), ip=copy(proc.ip), proc_outs=copy(proc.contract.outs)))
 
-    assert len(OpType) == 16, f"Exhaustive handling of ops in type_check_program {len(OpType)}"
+    assert len(OpType) == 17, f"Exhaustive handling of ops in type_check_program {len(OpType)}"
     while len(contexts) > 0:
         ctx = contexts[-1]
         if ctx.ip >= len(program.ops):
@@ -722,6 +732,7 @@ def type_check_program(program : Program):
             contexts.pop()
             continue
         op = program.ops[ctx.ip]
+
         if op.type == OpType.PUSH_INT:
             ctx.stack.append((DataType.INT, op.token.loc))
             ctx.ip += 1
@@ -790,6 +801,9 @@ def type_check_program(program : Program):
             assert isinstance(op.operand, OpAddr)
             ctx.ip = op.operand
         elif op.type == OpType.BREAK:
+            ctx.ip += 1
+
+        elif op.type == OpType.TYPE_BREAK:
             breakpoint = True
             ctx.ip += 1
 
@@ -1007,7 +1021,7 @@ def compile_program(program : Program, outFilePath : str) -> None:
     #add implementation of logic
     for i, op in enumerate(program.ops):
         content[writer] += "\n" + 3*"  " +  f"addr_{i}:\n"
-        assert len(OpType) == 16, f"Exhaustive handling of operations whilst compiling {len(OpType)}"
+        assert len(OpType) == 17, f"Exhaustive handling of operations whilst compiling {len(OpType)}"
 
         if op.type == OpType.PUSH_INT:
             valToPush = op.operand
@@ -1044,7 +1058,10 @@ def compile_program(program : Program, outFilePath : str) -> None:
 
         elif op.type == OpType.BREAK:
             pass
-        
+
+        elif op.type == OpType.TYPE_BREAK:
+            pass
+
         elif op.type in [OpType.IF, OpType.ELIF]:
             jmp_idx = op.operand
             content[writer] += f" ; -- if --\n"
@@ -1295,7 +1312,6 @@ def compile_program(program : Program, outFilePath : str) -> None:
                 content[writer] += "      pop  ebx\n" #int
                 content[writer] += "      mov  [eax], ebx\n"
 
-
             if op.operand == Intrinsic.SHL:
                 content[writer] += "      ;-- shl --\n"
                 content[writer] += "      pop ecx\n"
@@ -1422,7 +1438,7 @@ def simulate_program(program : Program, argv : List[str]) -> None:
         op = program.ops[i]
         # print(stack)
 
-        assert len(OpType) == 16, f"Exhaustive handling of operations whilst simulating {len(OpType)}"
+        assert len(OpType) == 17, f"Exhaustive handling of operations whilst simulating {len(OpType)}"
         if op.type == OpType.PUSH_INT:
             assert isinstance(op.operand, int)
             valToPush = op.operand
@@ -1536,6 +1552,9 @@ def simulate_program(program : Program, argv : List[str]) -> None:
 
         elif op.type == OpType.BREAK:
             breakpoint = True
+            i += 1
+        
+        elif op.type == OpType.TYPE_BREAK:
             i += 1
 
         elif op.type in [OpType.IF, OpType.ELIF]:
@@ -1700,14 +1719,14 @@ def simulate_program(program : Program, argv : List[str]) -> None:
                 i += 1
 
             elif op.operand == Intrinsic.STORE:
-                val = stack.pop()
                 addr = stack.pop()
+                val = stack.pop()
                 mem[addr] = val & 0xFF
                 i += 1
 
             elif op.operand == Intrinsic.STORE32:
-                store_value = stack.pop()
                 store_addr32 = stack.pop()
+                store_value = stack.pop()
                 mem[store_addr32 + 0] = store_value & 0xff
                 mem[store_addr32 + 1] = (store_value>>8) & 0xff
                 mem[store_addr32 + 2] = (store_value>>16) & 0xff
@@ -1776,7 +1795,7 @@ def simulate_program(program : Program, argv : List[str]) -> None:
             if show_strings[0]:
                 print(f"strings: {mem[str_buf_ptr:str_buf_ptr + show_strings[1]]}")
             if show_mem[0]:
-                print(f"mem: {mem[mem_buf_ptr:mem_buf_ptr + show_mem[1]]}")
+                print(f"mem: {[ str(val) + ':' + chr(val) for val in mem[mem_buf_ptr:mem_buf_ptr + show_mem[1]]]}")
             if show_args[0]:
                 print(f"args: {mem[args_buf_ptr:args_buf_ptr + show_args[1]]}")
 
