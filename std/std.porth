@@ -201,6 +201,8 @@ memory readLine_line_buffer_ptr 4 end
 memory readLine_cur_char 1 end
 memory readLine_fh 4 end
 
+// requires a empty buffer so use free 
+// lineBuffer, fileHandle
 proc readLine ptr int in
     readLine_fh !32
     <int> readLine_line_buffer_ptr !32
@@ -210,6 +212,7 @@ proc readLine ptr int in
         1 +
     end drop
     0 readLine_cur_char !8
+    
 end
 
 memory truncate_fh 4 end

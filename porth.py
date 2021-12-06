@@ -4,7 +4,7 @@ from enum import Enum,auto,IntEnum
 import subprocess
 from os import path, getcwd
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import *
 from copy import copy
 
@@ -28,6 +28,7 @@ class Keyword(Enum):
     MACRO = auto()
     PROC= auto()
     MEMORY = auto()
+    CONST = auto()
     INCLUDE = auto()
     SYSCALL = auto()
     SYSVAL = auto()
@@ -98,7 +99,7 @@ class OpType(Enum):
     RET=auto()
     CALL=auto()
 
-assert len(Keyword) == 16, f"Exhaustive handling in KEYWORD NAMES {len(Keyword)}"
+assert len(Keyword) == 17, f"Exhaustive handling in KEYWORD NAMES {len(Keyword)}"
 KEYWORD_NAMES = {
     "if"    :   Keyword.IF,
     "else"  :   Keyword.ELSE,
@@ -108,6 +109,7 @@ KEYWORD_NAMES = {
     "macro" :   Keyword.MACRO,
     "proc" :   Keyword.PROC,
     "memory" : Keyword.MEMORY,
+    "const" : Keyword.CONST,
     "include":  Keyword.INCLUDE,
     "syscall":  Keyword.SYSCALL,
     "sysval":  Keyword.SYSVAL,
@@ -212,6 +214,8 @@ class Op:
 class Program:
     ops : List[Op]
     procs : List[Proc]
+    consts : Dict[str, int] = field(default_factory= lambda : {})
+    memories : Dict[str, int] = field(default_factory= lambda: {})
     memory_capacity : int = 0
 
 
@@ -301,7 +305,7 @@ def compiler_error(loc: Loc, message: str, exits : bool = True):
 def compiler_note(loc: Loc, message: str, exits : bool = True):
     compiler_diagnostic(loc, 'NOTE', message,exits)
 
-def evaluate_constant_from_tokens(rtokens : List[Token]) -> int:
+def evaluate_constant_from_tokens(rtokens : List[Token], consts : Dict[str, int]) -> int:
     stack : List[int] = []
     while len(rtokens) > 0:
         token = rtokens.pop()
@@ -314,7 +318,9 @@ def evaluate_constant_from_tokens(rtokens : List[Token]) -> int:
             assert isinstance(token.value, int)
             stack.append(token.value)
         elif token.type == TokenType.WORD:
-            if token.value == INTRINSIC_WORDS_TO_INTRINSIC[Intrinsic.ADD]:
+            if token.value in consts:
+                stack.append(consts[token.value])
+            elif token.value == INTRINSIC_WORDS_TO_INTRINSIC[Intrinsic.ADD]:
                 a = stack.pop()
                 b = stack.pop()
                 stack.append(a + b)
@@ -323,6 +329,7 @@ def evaluate_constant_from_tokens(rtokens : List[Token]) -> int:
                 b = stack.pop()
                 stack.append(a*b)
             else:
+                print(consts)
                 sys.exit("%s:%d:%d unsupported word `%s` in constant evaluation" % (token.loc + (token.text,)))
         else:
             sys.exit("%s:%d:%d unsupported token `%s` in constant evaluation" % (token.loc + (token.text,)))
@@ -338,7 +345,6 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
     program: Program = Program(ops=[], memory_capacity=0, procs=[])
     rtokens : List[Token] = list(reversed(tokens))
     macros: Dict[str, Macro] = {}
-    memories : Dict[str, MemAddr] = {}
     current_proc : Optional[OpAddr] = None
     ip : OpAddr = 0
     while len(rtokens) > 0:
@@ -366,16 +372,22 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                         compiler_error(token.loc, f"macro exansion limit of {EXPANSION_LIMIT} exceeded")
                     continue
             
-            elif token.value in memories:
-                op = Op(OpType.PUSH_MEM, token, memories[token.value])
+            elif token.value in program.memories:
+                op = Op(OpType.PUSH_MEM, token, program.memories[token.value])
                 program.ops.append(op)
                 ip += 1
+
+            elif token.value in program.consts:
+                op = Op(OpType.PUSH_INT, token, program.consts[token.value])
+                program.ops.append(op)
+                ip += 1
+
             elif token.value in map(lambda x : x.name , program.procs):
                 current_proc_found = list(filter(lambda x : x.name == token.value, program.procs))[0]
                 program.ops.append(Op(OpType.CALL, token, current_proc_found))
                 ip +=1
             else:
-                print(memories,[ tok.text for tok in rtokens])
+                print(program.memories,[ tok.text for tok in rtokens])
                 compiler_error(token.loc, f"unknown word `{token.text}`")
             
 
@@ -398,7 +410,7 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
             ip += 1
 
         elif token.type == TokenType.KEYWORD:
-            assert len(Keyword) == 16, "Exhaustive ops handling in compile_tokens_to_program. Only ops that form blocks must be handled"
+            assert len(Keyword) == 17, "Exhaustive ops handling in compile_tokens_to_program. Only ops that form blocks must be handled"
 
 
             if token.value == Keyword.WHILE:
@@ -575,19 +587,43 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                 memory_name : str = token.value
                 if memory_name in macros:
                     assert isinstance(token.value, str)
-                    compiler_error(token.loc, f"redefinition of already existing macro `{token.value}`", exits=False)
+                    compiler_error(token.loc, f"redefinition of an existing keyword of a macro `{token.value}`", exits=False)
                     compiler_note(macros[token.value].loc, f"the first definition is located here")
 
                 if memory_name in INTRINSIC_WORDS:
                     compiler_error(token.loc, f"redefinition of a builtin word `{token.value}`")
 
-                if memory_name in memories:
-                    compiler_error(token.loc, f"redefinition of already existing memory `{token.value}`", exits=False)
-                    # compiler_note(memories[token.value].loc, "the first definition is located here")
+                if memory_name in program.memories:
+                    compiler_error(token.loc, f"redefinition of an existing keyword of a memory `{token.value}`", exits=False)
+                    # compiler_note(program.memories[token.value].loc, "the first definition is located here")
 
-                mem_size = evaluate_constant_from_tokens(rtokens)
-                memories[memory_name] = program.memory_capacity
+                mem_size = evaluate_constant_from_tokens(rtokens, program.consts)
+                program.memories[memory_name] = program.memory_capacity
                 program.memory_capacity += mem_size
+
+            elif token.value == Keyword.CONST:
+                if len(rtokens) == 0:
+                    compiler_error(token.loc, f"expected constant's name but found nothing")
+                
+                token = rtokens.pop()
+                if token.type != TokenType.WORD:
+                    compiler_error(token.loc, f"expected constant's name to be {readable_enum(TokenType.WORD)} but found {readable_enum(token.type)}")
+
+                const_name = token.value
+
+                if const_name in macros:
+                    assert isinstance(token.value, str)
+                    compiler_error(token.loc, f"redefinition of an existing keyword of a macro `{token.value}`", exits=False)
+                    compiler_note(macros[token.value].loc, f"the first definition is located here")
+
+                if const_name in INTRINSIC_WORDS:
+                    compiler_error(token.loc, f"redefinition of a builtin word `{token.value}`")
+
+                if const_name in program.memories:
+                    compiler_error(token.loc, f"redefinition of an existing keyword of a memory `{token.value}`", exits=False)
+                
+                const_value = evaluate_constant_from_tokens(rtokens, program.consts)
+                program.consts[const_name] = const_value
 
             elif token.value == Keyword.PROC:
                 if current_proc is None:
@@ -632,7 +668,7 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                 if token.value in INTRINSIC_WORDS:
                     print("%s:%d:%d: ERROR: redefinition of a builtin word `%s`" % (token.loc + (token.value, )))
                 
-                if token.value in memories:
+                if token.value in program.memories:
                     sys.exit("%s:%d:%d: ERROR: redefinition of already existing memory `%s`" % (token.loc + (token.value, )))
 
                 macro = Macro(token.loc, [])
@@ -641,8 +677,8 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                 nestAmt = 0
                 while len(rtokens) > 0:
                     token = rtokens.pop()
-                    assert len(Keyword) == 16, f"Exaustive handling of keywords with `end` in compile_tokens_to_program for end type starters like Keyword.IF, Keyword.DO {len(Keyword)}"
-                    if token.type == TokenType.KEYWORD and token.value in [Keyword.IF, Keyword.WHILE, Keyword.PROC, Keyword.MEMORY, Keyword.MACRO]:
+                    assert len(Keyword) == 17, f"Exaustive handling of keywords with `end` in compile_tokens_to_program for end type starters like Keyword.IF, Keyword.DO {len(Keyword)}"
+                    if token.type == TokenType.KEYWORD and token.value in [Keyword.IF, Keyword.WHILE, Keyword.PROC, Keyword.MEMORY, Keyword.CONST, Keyword.MACRO]:
                         nestAmt += 1
 
                     macro.tokens.append(token)
