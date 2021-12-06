@@ -1,0 +1,52 @@
+include "std.porth"
+
+macro draw_size 300 end
+
+memory fh 4 end
+memory buffer 100 end
+memory current_number 4 end
+memory bingo_draw_numbers 300  end
+
+
+"d4_input.txt" fopen
+fh swap !32
+
+// i cn &allnum+i
+// i num &allnum
+0 while dup draw_size < do
+    1 buffer fh @32 fread
+    0 while buffer @8 isNumericChar do
+        dup current_number + buffer @32 !8
+        1 buffer fh @32 fread
+        1 +
+    end drop
+
+    current_number str_to_int bingo_draw_numbers 2over sizeof(i32) * + 
+    swap !32
+
+    buffer @32 ',' != if 
+        drop draw_size
+    else
+        current_number 0 !32 
+    end
+    1 +
+end drop
+3 buffer fh @32 fread
+
+// ! I give up this is too hard i need better inbuilt functions
+
+// macro bingo_size 5 end
+// macro max_bingocards 100 end
+// macro bingo_card bingo_size*bingo_size*max_bingocards end 
+
+// 0 while dup bingo_size < do
+//     1 buffer fh @32 fread
+//     0 while buffer @8 isNumericChar do
+//         dup current_number + buffer @32 !8
+//         1 buffer fh @32 fread
+//         1 +
+//     end drop
+//     1 +
+// end
+
+fh @32 fclose

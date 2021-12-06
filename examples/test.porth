@@ -1,5 +1,16 @@
-proc sum_of_3
-    +
-end
+include "std.porth"
 
-3 5 sum_of_3 dump
+memory fh 4 end
+
+"test_read.txt" fopen
+fh !32
+
+memory line_buffer 50 end
+
+0 while dup 31 < do 
+    line_buffer fh @32 readLine
+    line_buffer stdout
+    1 +
+end drop
+
+fh @32 fclose

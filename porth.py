@@ -50,9 +50,10 @@ class Intrinsic(Enum):
     NE = auto()
     GT = auto()
     LT = auto()
+    GTE= auto()
+    LTE = auto()
     # stack operations
     DROP= auto()
-    DUMP = auto()
     DUP = auto()
     DUP2=auto()
     OVER= auto()
@@ -114,7 +115,7 @@ KEYWORD_NAMES = {
     "--"   :   Keyword.DASHDASH,
 }
 
-assert len(Intrinsic) == 29 , f"Exhaustive handling in INTRINSIC_WORDS {len(Intrinsic)}"
+assert len(Intrinsic) == 30 , f"Exhaustive handling in INTRINSIC_WORDS {len(Intrinsic)}"
 INTRINSIC_WORDS = {
     "stdout" : Intrinsic.STDOUT,
     "exit"  : Intrinsic.EXIT,
@@ -122,21 +123,22 @@ INTRINSIC_WORDS = {
     "-"     : Intrinsic.SUB,
     "divmod": Intrinsic.DIVMOD,
     "*"     : Intrinsic.MUL,
-    "dump"  : Intrinsic.DUMP,
     "="     : Intrinsic.EQUAL,
     "!="    : Intrinsic.NE,
     ">"     : Intrinsic.GT,
     "<"     : Intrinsic.LT,
+    "<="     : Intrinsic.GTE,
+    ">="     : Intrinsic.LTE,
     "drop"  : Intrinsic.DROP,
     "dup"   : Intrinsic.DUP,
     "2dup"  : Intrinsic.DUP2,
     "swap"  : Intrinsic.SWAP,
     "over"  : Intrinsic.OVER,
     "2over" : Intrinsic.OVER2,
-    "store8"     : Intrinsic.STORE,
-    "load8"     : Intrinsic.LOAD,
-    "store32":Intrinsic.STORE32,
-    "load32": Intrinsic.LOAD32,
+    "!8"     : Intrinsic.STORE,
+    "@8"     : Intrinsic.LOAD,
+    "!32":Intrinsic.STORE32,
+    "@32": Intrinsic.LOAD32,
     "shl"   : Intrinsic.SHL,
     "shr"   : Intrinsic.SHR,
     "bor"   : Intrinsic.BOR,
@@ -180,11 +182,14 @@ DATATYPE_BY_NAME = {
     "bool" : DataType.BOOL,
     "ptr" : DataType.PTR,
 }
+DATATYPE_NAMES = { val : key for key, val in DATATYPE_BY_NAME.items()}
+
+DataStack=List[Tuple[DataType, Loc]]
 
 @dataclass
 class Contract:
-    ins : List[DataType]
-    outs : List[DataType]
+    ins :  List[DataStack]
+    outs : List[DataStack]
 
 @dataclass
 class Proc:
@@ -361,8 +366,8 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                 program.ops.append(op)
                 ip += 1
             elif token.value in map(lambda x : x.name , program.procs):
-                current_proc = list(filter(lambda x : x.name == token.value, program.procs))[0]
-                program.ops.append(Op(OpType.CALL, token, current_proc))
+                current_proc_found = list(filter(lambda x : x.name == token.value, program.procs))[0]
+                program.ops.append(Op(OpType.CALL, token, current_proc_found))
                 ip +=1
             else:
                 print(memories,[ tok.text for tok in rtokens])
@@ -462,6 +467,11 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                     program.ops[block_ip].operand = ip
                     program.ops[ip].operand = ip + 1
                 
+                elif program.ops[block_ip].type == OpType.IF:
+                    program.ops.append(Op(OpType.END, token))
+                    program.ops[ip].operand = ip + 1
+                    program.ops[block_ip].operand = block_ip + 1
+                
                 elif program.ops[block_ip].type == OpType.DO:
                     program.ops.append(Op(OpType.END, token))
                     assert isinstance(program.ops[block_ip].operand, int)
@@ -481,6 +491,7 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                     program.ops[block_ip].operand = ip
                     program.ops[else_before_elif_ip].operand = ip
                     program.ops[ip].operand = ip + 1
+
                 elif program.ops[block_ip].type == OpType.SKIP_PROC:
                     program.ops.append(Op(OpType.RET, token, program.ops[block_ip].operand))
                     program.ops[block_ip].operand.ret_ip = ip + 1
@@ -584,13 +595,7 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                         compiler_error(token.loc, f"procedure {proc_name} already exists")
 
                     contract = parse_proc_contract(rtokens)
-                    if len(contract.outs) > 0:
-                        current_proc = ip + len(contract.ins)
-                    else:
-                        current_proc = ip + 1
-                    if len(contract.outs) > 0:
-                        current_proc += len(contract.outs)
-                    proc = Proc(proc_name, current_proc, contract)
+                    proc = Proc(proc_name, ip + 1, contract)
                     program.procs.append(proc)
                     op = Op(type=OpType.SKIP_PROC, token=token, operand=proc)
                     program.ops.append(op)
@@ -601,7 +606,6 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                     compiler_error(token.loc, "defining procedures in a procedure is not allowed", exits=False)
                     compiler_note(program.ops[current_proc].token.loc, "the current_proc starts here")
 
-            # TODO: capability to define macros from command line
             elif token.value == Keyword.MACRO:
                 if len(rtokens) == 0:
                     sys.exit("%s:%d:%d: ERROR: expected macro name but found nothing" % token.loc)
@@ -624,7 +628,6 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                 macro = Macro(token.loc, [])
                 macros[token.value] = macro
 
-                # TODO: support for nested blocks within the macro definition
                 nestAmt = 0
                 while len(rtokens) > 0:
                     token = rtokens.pop()
@@ -665,24 +668,57 @@ def load_program(file_path : str ,includePaths : List[str]=[]) -> Program:
     program : Program  = compile_tokens_to_program(tokens, includePaths)
     return program
 
-DataStack=List[Tuple[DataType, Loc]]
 @dataclass
 class Context:
     stack : DataStack
     ip : int
+    proc_outs : List[DataType]
+
+def type_check_contract(intro_token: Token, ctx: Context, contract: Contract):
+    ins = list(contract.ins)
+    stack = copy(ctx.stack)
+    arg_count = 0
+    while len(stack) > 0 and len(ins) > 0:
+        actual, actual_loc = stack.pop()
+        expected, expected_loc = ins.pop()
+        if actual != expected:
+            compiler_error(intro_token.loc, f"Argument {arg_count} of `{intro_token.text}` is expected to be type `{DATATYPE_NAMES[expected]}` but got type `{DATATYPE_NAMES[actual]}`")
+            compiler_note(actual_loc, f"Argument {arg_count} was provided here")
+            compiler_note(expected_loc, f"Expected type was declared here")
+            exit(1)
+        arg_count += 1
+
+    if len(stack) < len(ins):
+        print(ins)
+        compiler_error(intro_token.loc, f"Not enough arguments provided for `{intro_token.value}`. Expected {len(contract.ins)} but got {arg_count}.");
+        compiler_note(intro_token.loc, f"Not provided arguments:")
+        while len(ins) > 0:
+            typ, loc = ins.pop()
+            compiler_note(loc, f"`{DATATYPE_NAMES[typ]}`")
+        exit(1)
+    
+    for typ, loc in contract.outs:
+        stack.append((typ, intro_token.loc))
+    ctx.stack = stack
+
 
 def type_check_program(program : Program):
     """
     given a program it type checks the stack for each operation
     """
     visited_dos : Dict[OpAddr, DataStack] = {}
-    contexts : List[Context] = [Context(stack=[], ip=0)]
-    assert len(OpType) == 13, "Exhaustive handling of ops in type_check_program"
+    contexts : List[Context] = [Context(stack=[], ip=0, proc_outs=[])]
+    breakpoint : bool = False
+    
+    for proc in program.procs:
+        contexts.append(Context(stack=copy(proc.contract.ins), ip=copy(proc.ip), proc_outs=copy(proc.contract.outs)))
+
+    assert len(OpType) == 16, f"Exhaustive handling of ops in type_check_program {len(OpType)}"
     while len(contexts) > 0:
         ctx = contexts[-1]
         if ctx.ip >= len(program.ops):
             if len(ctx.stack) != 0:
-                compiler_error(ctx.stack[0][1], f"Error: unhandled values in the stack of {[readable_enum(val[0]) for val in ctx.stack]} at the end of the program")
+                compiler_error(ctx.stack[0][1], f"unhandled values in the stack of {[readable_enum(val[0]) for val in ctx.stack]} at the end of the program")
             contexts.pop()
             continue
         op = program.ops[ctx.ip]
@@ -690,7 +726,6 @@ def type_check_program(program : Program):
             ctx.stack.append((DataType.INT, op.token.loc))
             ctx.ip += 1
         elif op.type == OpType.PUSH_STR:
-            ctx.stack.append((DataType.INT, op.token.loc))
             ctx.stack.append((DataType.PTR, op.token.loc))
             ctx.ip += 1
         elif op.type == OpType.PUSH_MEM:
@@ -708,35 +743,21 @@ def type_check_program(program : Program):
             ctx.stack.append((DataType.INT, op.token.loc))
             ctx.ip += 1
         elif op.type == OpType.IF:
-            if len(ctx.stack) < 1:
-                compiler_error(op.token.loc, f"not enough arguments for {readable_enum(op.type)} operand")
-            a_type, a_loc = ctx.stack.pop()
-            if a_type != DataType.BOOL:
-                compiler_error(op.token.loc, f"Argument for {readable_enum(op.type)} operand has incorrect type of {readable_enum(a_type)} expected bool")
+            type_check_contract(op.token, ctx, Contract(ins=[(DataType.BOOL,  op.token.loc)], outs=[]))
             ctx.ip += 1
-            contexts.append(Context(stack=copy(ctx.stack), ip=op.operand))
+            contexts.append(Context(stack=copy(ctx.stack), proc_outs=[], ip=op.operand))
             ctx = contexts[-1]
         elif op.type == OpType.ELSE:
             ctx.ip = op.operand
         elif op.type == OpType.ELIF:
-            if len(ctx.stack) < 1:
-                compiler_error(op.token.loc, f"not enough arguments for {readable_enum(op.type)} operand")
-            a_type, a_loc = ctx.stack.pop()
-            if a_type != DataType.BOOL:
-                compiler_error(op.token.loc, f"Argument for {readable_enum(op.type)} operand has incorrect type of {readable_enum(a_type)} expected bool")
+            type_check_contract(op.token, ctx, Contract(ins=[(DataType.BOOL,  op.token.loc)], outs=[]))
             ctx.ip += 1
             contexts.append(Context(stack=copy(ctx.stack), ip=op.operand))
             ctx = contexts[-1]
         elif op.type == OpType.WHILE:
             ctx.ip += 1
         elif op.type == OpType.DO:
-
-            if len(ctx.stack) < 1:
-                compiler_error(op.token.loc, f"not enough arguments for {readable_enum(op.type)} operand")
-            
-            a_type, a_loc = ctx.stack.pop()
-            if a_type != DataType.BOOL:
-                compiler_error(op.token.loc, f"Argument for {readable_enum(op.type)} operand has incorrect type of {readable_enum(a_type)} expected bool")
+            type_check_contract(op.token, ctx, Contract(ins=[(DataType.BOOL,  op.token.loc)], outs=[]))
 
             if ctx.ip in visited_dos:
                 expected_types = list(map(lambda x: x[0], visited_dos[ctx.ip]))
@@ -762,25 +783,32 @@ def type_check_program(program : Program):
             else:
                 visited_dos[ctx.ip] = copy(ctx.stack)
                 ctx.ip += 1
-                contexts.append(Context(stack=copy(ctx.stack), ip=op.operand))
+                contexts.append(Context(stack=copy(ctx.stack), ip=op.operand, proc_outs=[]))
                 ctx = contexts[-1]
 
         elif op.type == OpType.END:
             assert isinstance(op.operand, OpAddr)
             ctx.ip = op.operand
         elif op.type == OpType.BREAK:
+            breakpoint = True
             ctx.ip += 1
+
+        elif op.type == OpType.SKIP_PROC:
+            ctx.ip = op.operand.ret_ip
+
+        elif op.type == OpType.CALL:
+            type_check_contract(op.token, ctx, op.operand.contract)
+            # contexts[-1] = ctx
+            ctx.ip += 1
+
+        elif op.type == OpType.RET:
+            contexts.pop()
+
         elif op.type == OpType.INTRINSIC:
-            assert len(Intrinsic) == 29, "Exhaustive handling of Intrinsics in type_check_program"
+            assert len(Intrinsic) == 30, f"Exhaustive handling of Intrinsics in type_check_program {len(Intrinsic)}"
                 # win32 api operations
             if op.operand == Intrinsic.STDOUT:
-                if len(ctx.stack) < 1:
-                    compiler_error(op.token.loc, f"not enough arguments for {readable_enum(op.operand)} Intrinsic")
-                str_type, str_loc = ctx.stack.pop()
-                if str_type != DataType.PTR:
-                    sys.exit("%s:%d:%d: Error: Argument for %s Intrinsic has incorrect type %s" % (str_loc + (readable_enum(op.operand), readable_enum(str_type))))
-                
-                # ctx.stack.append((DataType.INT, op.token.loc))
+                type_check_contract(op.token, ctx, Contract(ins=[(DataType.PTR,  op.token.loc)], outs=[]))                 
                 ctx.ip += 1
             
             elif op.operand == Intrinsic.CAST_INT:
@@ -805,133 +833,46 @@ def type_check_program(program : Program):
                 return
 
             elif op.operand == Intrinsic.ADD:
-                if len(ctx.stack) < 2:
-                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = ctx.stack.pop()
-                b_type, b_loc = ctx.stack.pop()
-                if a_type not in [DataType.INT, DataType.PTR]:
-                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
-                
-                if b_type not in [DataType.INT, DataType.PTR]:
-                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
-
-                if a_type == DataType.PTR and b_type == DataType.PTR:
-                    sys.exit("%s:%d:%d: Error: both argument for %s Intrinsic are type %s which is a incorrect type" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
-
-                if a_type == DataType.PTR and b_type == DataType.INT or b_type == DataType.PTR and a_type == DataType.INT:
-                    ctx.stack.append((DataType.PTR, op.token.loc))
-                else:
-                    ctx.stack.append((DataType.INT, op.token.loc))
+                type_check_contract(op.token, ctx, Contract(ins=[(DataType.INT,  op.token.loc), (DataType.INT,  op.token.loc)], outs=[(DataType.INT,  op.token.loc)]))
                 ctx.ip += 1
             elif op.operand == Intrinsic.SUB:
-                if len(ctx.stack) < 2:
-                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = ctx.stack.pop()
-                b_type, b_loc = ctx.stack.pop()
-                if a_type not in [DataType.INT, DataType.PTR]:
-                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
-                
-                if b_type not in [DataType.INT, DataType.PTR]:
-                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
-
-                if a_type == DataType.PTR and b_type == DataType.PTR:
-                    sys.exit("%s:%d:%d: Error: both argument for %s Intrinsic are type %s which is a incorrect type" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
-
-                if a_type == DataType.PTR and b_type == DataType.INT or b_type == DataType.PTR and a_type == DataType.INT:
-                    ctx.stack.append((DataType.PTR, op.token.loc))
-                else:
-                    ctx.stack.append((DataType.INT, op.token.loc))
+                type_check_contract(op.token, ctx, Contract(ins=[(DataType.INT,  op.token.loc), (DataType.INT,  op.token.loc)], outs=[(DataType.INT,  op.token.loc)]))
                 ctx.ip += 1
 
             elif op.operand == Intrinsic.DIVMOD:
-                if len(ctx.stack) < 2:
-                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = ctx.stack.pop()
-                b_type, b_loc = ctx.stack.pop()
-                if a_type != DataType.INT:
-                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
-                
-                if b_type != DataType.INT:
-                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
-                ctx.stack.append((DataType.INT, op.token.loc))
-                ctx.stack.append((DataType.INT, op.token.loc))
+                type_check_contract(op.token, ctx, Contract(ins=[(DataType.INT,  op.token.loc), (DataType.INT,  op.token.loc)], outs=[(DataType.INT,  op.token.loc), (DataType.INT,  op.token.loc)]))
                 ctx.ip += 1
 
             elif op.operand == Intrinsic.MUL:
-                if len(ctx.stack) < 2:
-                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = ctx.stack.pop()
-                b_type, b_loc = ctx.stack.pop()
-                if a_type != DataType.INT:
-                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
-                
-                if b_type != DataType.INT:
-                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
-                ctx.stack.append((DataType.INT, op.token.loc))
+                type_check_contract(op.token, ctx, Contract(ins=[(DataType.INT,  op.token.loc), (DataType.INT,  op.token.loc)], outs=[(DataType.INT,  op.token.loc)]))
                 ctx.ip += 1
                 
             elif op.operand == Intrinsic.EQUAL:
-                if len(ctx.stack) < 2:
-                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = ctx.stack.pop()
-                b_type, b_loc = ctx.stack.pop()
-                if a_type not in [DataType.INT, DataType.PTR]:
-                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
-                
-                if b_type not in [DataType.INT, DataType.PTR]:
-                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
-                ctx.stack.append((DataType.BOOL, op.token.loc))
+                type_check_contract(op.token, ctx, Contract(ins=[(DataType.INT,  op.token.loc), (DataType.INT,  op.token.loc)], outs=[(DataType.BOOL,  op.token.loc)]))
                 ctx.ip += 1
 
             elif op.operand == Intrinsic.NE:
-                if len(ctx.stack) < 2:
-                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = ctx.stack.pop()
-                b_type, b_loc = ctx.stack.pop()
-                if a_type not in [DataType.INT, DataType.PTR]:
-                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
-                
-                if b_type not in [DataType.INT, DataType.PTR]:
-                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
-                ctx.stack.append((DataType.BOOL, op.token.loc))
+                type_check_contract(op.token, ctx, Contract(ins=[(DataType.INT,  op.token.loc), (DataType.INT,  op.token.loc)], outs=[(DataType.BOOL,  op.token.loc)]))
                 ctx.ip += 1
             elif op.operand == Intrinsic.GT:
-                if len(ctx.stack) < 2:
-                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = ctx.stack.pop()
-                b_type, b_loc = ctx.stack.pop()
-                if a_type not in [DataType.INT, DataType.PTR]:
-                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
-                
-                if b_type not in [DataType.INT, DataType.PTR]:
-                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
-                ctx.stack.append((DataType.BOOL, op.token.loc))
+                type_check_contract(op.token, ctx, Contract(ins=[(DataType.INT,  op.token.loc), (DataType.INT,  op.token.loc)], outs=[(DataType.BOOL,  op.token.loc)]))
                 ctx.ip += 1
             elif op.operand == Intrinsic.LT:
-                if len(ctx.stack) < 2:
-                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = ctx.stack.pop()
-                b_type, b_loc = ctx.stack.pop()
-                if a_type not in [DataType.INT, DataType.PTR]:
-                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
-                
-                if b_type not in [DataType.INT, DataType.PTR]:
-                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
+                type_check_contract(op.token, ctx, Contract(ins=[(DataType.INT,  op.token.loc), (DataType.INT,  op.token.loc)], outs=[(DataType.BOOL,  op.token.loc)]))
                 ctx.ip += 1
+
+            elif op.operand == Intrinsic.GTE:
+                type_check_contract(op.token, ctx, Contract(ins=[(DataType.INT,  op.token.loc), (DataType.INT,  op.token.loc)], outs=[(DataType.BOOL,  op.token.loc)]))
+                ctx.ip += 1
+            elif op.operand == Intrinsic.LTE:
+                type_check_contract(op.token, ctx, Contract(ins=[(DataType.INT,  op.token.loc), (DataType.INT,  op.token.loc)], outs=[(DataType.BOOL,  op.token.loc)]))
                 ctx.stack.append((DataType.BOOL, op.token.loc))
             elif op.operand == Intrinsic.DROP:
                 if len(ctx.stack) < 1:
                     sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
                 ctx.stack.pop()
                 ctx.ip += 1
-            elif op.operand == Intrinsic.DUMP:
-                if len(ctx.stack) < 1:
-                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
 
-                a_type, a_loc = ctx.stack.pop()
-                if a_type != DataType.INT:
-                    sys.exit("%s:%d:%d: Error: Argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
-                ctx.ip += 1
             elif op.operand == Intrinsic.DUP:
                 if len(ctx.stack) < 1:
                     sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
@@ -979,133 +920,82 @@ def type_check_program(program : Program):
                 ctx.stack.append(b)
                 ctx.ip += 1
             elif op.operand == Intrinsic.STORE:
-                if len(ctx.stack) < 2:
-                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = ctx.stack.pop()
-                b_type, b_loc = ctx.stack.pop()
-                if a_type != DataType.INT:
-                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
-                if b_type != DataType.PTR:
-                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(b_type))))
+                type_check_contract(op.token, ctx, Contract(ins=[(DataType.INT,  op.token.loc), (DataType.PTR,  op.token.loc)], outs=[]))
                 ctx.ip += 1
-            elif op.operand == Intrinsic.LOAD:
-                a_type, a_loc = ctx.stack.pop()
-                if a_type != DataType.PTR:
-                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
-                ctx.stack.append((DataType.INT, op.token.loc))
-                ctx.ip += 1
-            elif op.operand == Intrinsic.STORE32:
-                if len(ctx.stack) < 2:
-                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = ctx.stack.pop()
-                b_type, b_loc = ctx.stack.pop()
-                if a_type != DataType.INT:
-                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
-                if b_type != DataType.PTR:
-                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(b_type))))
-                ctx.ip += 1  
-            elif op.operand == Intrinsic.LOAD32:
-                a_type, a_loc = ctx.stack.pop()
-                if a_type != DataType.PTR:
-                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
-                ctx.stack.append((DataType.INT, op.token.loc))
-                ctx.ip += 1
-            elif op.operand == Intrinsic.SHL:
-                if len(ctx.stack) < 2:
-                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = ctx.stack.pop()
-                b_type, b_loc = ctx.stack.pop()
-                if a_type != DataType.INT:
-                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
-                
-                if b_type != DataType.INT:
-                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
 
-                ctx.stack.append((DataType.INT, op.token.loc))
+            elif op.operand == Intrinsic.LOAD:
+                type_check_contract(op.token, ctx, Contract(ins=[(DataType.PTR,  op.token.loc)], outs=[(DataType.INT,  op.token.loc)]))
                 ctx.ip += 1
+
+            elif op.operand == Intrinsic.STORE32:
+                type_check_contract(op.token, ctx, Contract(ins=[(DataType.INT,  op.token.loc), (DataType.PTR,  op.token.loc)], outs=[]))
+                ctx.ip += 1
+
+            elif op.operand == Intrinsic.LOAD32:
+                type_check_contract(op.token, ctx, Contract(ins=[(DataType.PTR,  op.token.loc)], outs=[(DataType.INT,  op.token.loc)]))
+                ctx.ip += 1
+
+            elif op.operand == Intrinsic.SHL:
+                type_check_contract(op.token, ctx, Contract(ins=[(DataType.INT,  op.token.loc), (DataType.INT,  op.token.loc)], outs=[(DataType.INT,  op.token.loc)]))
+                ctx.ip += 1
+
             elif op.operand == Intrinsic.SHR:
-                if len(ctx.stack) < 2:
-                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = ctx.stack.pop()
-                b_type, b_loc = ctx.stack.pop()
-                if a_type != DataType.INT:
-                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
-                
-                if b_type != DataType.INT:
-                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
-                ctx.stack.append((DataType.INT, op.token.loc))
+                type_check_contract(op.token, ctx, Contract(ins=[(DataType.INT,  op.token.loc), (DataType.INT,  op.token.loc)], outs=[(DataType.INT,  op.token.loc)]))
                 ctx.ip += 1
             elif op.operand == Intrinsic.BAND:
-                if len(ctx.stack) < 2:
-                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = ctx.stack.pop()
-                b_type, b_loc = ctx.stack.pop()
-                if a_type != DataType.INT:
-                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
-                
-                if b_type != DataType.INT:
-                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
-                ctx.stack.append((DataType.INT, op.token.loc))
+                type_check_contract(op.token, ctx, Contract(ins=[(DataType.INT,  op.token.loc), (DataType.INT,  op.token.loc)], outs=[(DataType.INT,  op.token.loc)]))
                 ctx.ip += 1
+
             elif op.operand == Intrinsic.BOR:
-                if len(ctx.stack) < 2:
-                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = ctx.stack.pop()
-                b_type, b_loc = ctx.stack.pop()
-                if a_type != DataType.INT:
-                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
-                
-                if b_type != DataType.INT:
-                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
-                ctx.stack.append((DataType.INT, op.token.loc))
+                type_check_contract(op.token, ctx, Contract(ins=[(DataType.INT,  op.token.loc), (DataType.INT,  op.token.loc)], outs=[(DataType.INT,  op.token.loc)]))
                 ctx.ip += 1
-            elif op.operand == Intrinsic.BXOR:
-                if len(ctx.stack) < 2:
-                    sys.exit("%s:%d:%d: Error: not enough arguments for %s Intrinsic" % (op.token.loc + (readable_enum(op.operand),)))
-                a_type, a_loc = ctx.stack.pop()
-                b_type, b_loc = ctx.stack.pop()
-                if a_type != DataType.INT:
-                    sys.exit("%s:%d:%d: Error: First argument for %s Intrinsic has incorrect type %s" % (a_loc + (readable_enum(op.operand), readable_enum(a_type))))
                 
-                if b_type != DataType.INT:
-                    sys.exit("%s:%d:%d: Error: Second argument for %s Intrinsic has incorrect type %s" % (b_loc + (readable_enum(op.operand), readable_enum(b_type))))
-                ctx.stack.append((DataType.INT, op.token.loc))
-        # compiler_diagnostic(op.token.loc,"", f"ctx:{len(contexts)-1} `{op.token.text}` ip:{ctx.ip} type check: {[ readable_enum(val[0]) for val in ctx.stack]} {readable_enum(op.type)} {readable_enum(op.operand)}",exits=False)
+            elif op.operand == Intrinsic.BXOR:
+                type_check_contract(op.token, ctx, Contract(ins=[(DataType.INT,  op.token.loc), (DataType.INT,  op.token.loc)], outs=[(DataType.INT,  op.token.loc)]))
+                ctx.ip += 1
+
+        if breakpoint:
+            operand = op.operand
+            if isinstance(operand, Proc):
+                operand = op.operand.name
+            compiler_note(op.token.loc, f"{ctx.ip}: {readable_enum(op.type)} {operand}: {[ readable_enum(val[0]) for val in ctx.stack]}", exits=False)
+            flags = input()
+
+def parse_contract_list(rtokens: List[Token], stoppers: List[Keyword]) -> Tuple[List[Tuple[DataType, Loc]], Keyword]:
+    args: List[Tuple[DataType, Loc]] = []
+    while len(rtokens) > 0:
+        token = rtokens.pop()
+        if token.type == TokenType.WORD:
+            assert isinstance(token.value, str)
+            if token.value in DATATYPE_BY_NAME:
+                args.append((DATATYPE_BY_NAME[token.value], token.loc))
+            else:
+                compiler_error(token.loc, f"Unknown data type {token.value}")
+                exit(1)
+        elif token.type == TokenType.KEYWORD:
+            assert isinstance(token.value, Keyword)
+            if token.value in stoppers:
+                return (args, token.value)
+            else:
+                compiler_error(token.loc, f"Unexpected keyword {KEYWORD_NAMES[token.value]}")
+                exit(1)
+        else:
+            compiler_error(token.loc, f"{readable_enum(token.type)} are not allowed in procedure definition.")
+            exit(1)
+
+    compiler_error(token.loc, f"Unexpected end of file. Expected keywords: ")
+    for keyword in stoppers:
+        compiler_note(token.loc, f"  {KEYWORD_NAMES[keyword]}")
+    exit(1)
 
 def parse_proc_contract(rtokens : List[Token]) -> Contract:
     contract = Contract(ins=[], outs=[])
-    while len(rtokens) > 0:
-        token = rtokens.pop()
-        if token.type == TokenType.WORD:
-            if token.value in DATATYPE_BY_NAME:
-                contract.ins.append(DATATYPE_BY_NAME[token.value])
-            else:
-                compiler_error(token.loc, f"unknown datatype {token.value}")
-        elif token.type == TokenType.KEYWORD:
-            if token.value == Keyword.DASHDASH:
-                break
-            elif token.value == Keyword.IN:
-                return contract
-            else:
-                compiler_error(token.loc, f"unknown keyword {token.value}")
-        else:
-            compiler_error(token.loc, f"unexpected token of type {token.type}")
-    
-    while len(rtokens) > 0:
-        token = rtokens.pop()
-        if token.type == TokenType.WORD:
-            if token.value in DATATYPE_BY_NAME:
-                contract.outs.append(DATATYPE_BY_NAME[token.value])
-            else:
-                compiler_error(token.loc, f"unknown datatype {token.value}")
-        elif token.type == TokenType.KEYWORD:
-            if token.value == Keyword.IN:
-                return contract
-            else:
-                compiler_error(token.loc, f"unknown keyword {token.value}")
-        else:
-            compiler_error(token.loc, f"unexpected token of type {token.type}")
-    compiler_error(token.loc, f"keyword `in`not encountered")
+    contract.ins, stopper = parse_contract_list(rtokens, [Keyword.DASHDASH, Keyword.IN])
+    if stopper == Keyword.IN:
+        return contract
+    contract.outs, stopper = parse_contract_list(rtokens, [Keyword.IN])
+    assert stopper == Keyword.IN
+    return contract
 
 def compile_program(program : Program, outFilePath : str) -> None:
     content : Dict[str:str] = {"main" : "", "procs" : "", "strs" : ""}
@@ -1129,7 +1019,7 @@ def compile_program(program : Program, outFilePath : str) -> None:
             valToPush = op.operand
             assert isinstance(valToPush, str)
             content[writer] += f"      lea edi, str_{no_of_strs}\n"
-            content[writer] += f"      push {len(valToPush)}\n"
+            # content[writer] += f"      push {len(valToPush)}\n"
             content[writer] += f"      push edi\n"
             str_as_nums = ", ".join(map(str,list(bytes(valToPush, "utf-8"))))
             content["strs"] += f"    str_{no_of_strs} db {str_as_nums}, 0 \n"
@@ -1188,14 +1078,15 @@ def compile_program(program : Program, outFilePath : str) -> None:
                 content[writer] += f"      ;-- end --\n"
                 content[writer] += f"      jmp addr_{jmp_idx}\n"
 
+        # TODO: proc break if any values left on stack
         elif op.type == OpType.SKIP_PROC:
             content[writer] += f"      ;-- skip proc --\n"
             writer = "procs"
             current_proc = op.token.value
             content[writer] += f"\n  {current_proc} PROC\n"
-            print(op.operand)
             for i in range(len(op.operand.contract.ins)-1,-1,-1):
                 content[writer] += f"      push {call_reg_order[i]}\n"
+
 
         elif op.type == OpType.RET:
             content[writer] += f"      ;-- RET proc --\n"
@@ -1213,7 +1104,7 @@ def compile_program(program : Program, outFilePath : str) -> None:
             for i in range(len(op.operand.contract.outs)):
                 content[writer] += f"      push {call_reg_order[i]}\n"
 
-        assert len(Intrinsic) == 29, f"Exaustive handling of Intrinsic's in Compiling {len(Intrinsic)}"
+        assert len(Intrinsic) == 30, f"Exaustive handling of Intrinsic's in Compiling {len(Intrinsic)}"
         if op.type == OpType.INTRINSIC:
 
             if op.operand == Intrinsic.STDOUT:
@@ -1311,12 +1202,30 @@ def compile_program(program : Program, outFilePath : str) -> None:
                 content[writer] += f"      ZERO{i}:\n"
                 content[writer] += f"          push 0\n"
                 content[writer] += f"      END{i}:\n"
+            
+            if op.operand == Intrinsic.GTE:
+                content[writer] += f"     ; -- greater than --\n"
+                content[writer] += f"      pop eax\n"
+                content[writer] += f"      pop ebx\n"
+                content[writer] += f"      cmp eax, ebx\n"
+                content[writer] += f"      jg ZERO{i}\n"
+                content[writer] += f"      push 1\n"
+                content[writer] += f"      jmp END{i}\n"
+                content[writer] += f"      ZERO{i}:\n"
+                content[writer] += f"          push 0\n"
+                content[writer] += f"      END{i}:\n"
 
-            if op.operand == Intrinsic.DUMP:
-                content[writer] += f"      ; -- dump --\n"
-                content[writer] += "      pop eax\n"
-                content[writer] += "      lea edi, decimalstr\n"
-                content[writer] += "      call DUMP\n"
+            if op.operand == Intrinsic.LTE:
+                content[writer] += f"     ; -- less than --\n"
+                content[writer] += f"      pop eax\n"
+                content[writer] += f"      pop ebx\n"
+                content[writer] += f"      cmp eax, ebx\n"
+                content[writer] += f"      jl ZERO{i}\n"
+                content[writer] += f"      push 1\n"
+                content[writer] += f"      jmp END{i}\n"
+                content[writer] += f"      ZERO{i}:\n"
+                content[writer] += f"          push 0\n"
+                content[writer] += f"      END{i}:\n"
 
             if op.operand == Intrinsic.DUP:
                 content[writer] += "      ; -- duplicate (dup) --\n"
@@ -1368,21 +1277,23 @@ def compile_program(program : Program, outFilePath : str) -> None:
             if op.operand == Intrinsic.LOAD32:
                 content[writer] += "      ;-- load32 --\n"
                 content[writer] += "      pop eax\n"
+                # content[writer] += "      push offset eax\n"
+
                 content[writer] += "      mov ebx, [eax]\n"
                 content[writer] += "      push ebx\n"
 
 
             if op.operand == Intrinsic.STORE:
                 content[writer] += "      ;-- store (.) --\n"
-                content[writer] += "      pop  eax\n"
-                content[writer] += "      pop  ebx\n"
-                content[writer] += "      mov  byte ptr [ebx], al\n"
+                content[writer] += "      pop  eax\n" #ptr
+                content[writer] += "      pop  ebx\n" #int
+                content[writer] += "      mov  byte ptr [eax], bl\n"
 
             if op.operand == Intrinsic.STORE32:
                 content[writer] += "      ;-- store32 --\n"
-                content[writer] += "      pop  eax\n"
-                content[writer] += "      pop  ebx\n"
-                content[writer] += "      mov  [ebx], eax\n"
+                content[writer] += "      pop  eax\n" #ptr
+                content[writer] += "      pop  ebx\n" #int
+                content[writer] += "      mov  [eax], ebx\n"
 
 
             if op.operand == Intrinsic.SHL:
@@ -1434,15 +1345,13 @@ def compile_program(program : Program, outFilePath : str) -> None:
         wf.write("includelib C:\masm32\lib\\user32.lib\n")
         wf.write("includelib C:\masm32\lib\masm32.lib\n")
         wf.write(".data\n")
-        wf.write("    decimalstr db 16 DUP (0)  ; address to store dump values\n")
         wf.write("    aSymb db 97, 0\n")
-        wf.write("    negativeSign db \"-\", 0    ; negativeSign     \n")
-        wf.write("    nl DWORD 10               ; new line character in ascii\n")
 
         wf.write(content["strs"])
 
         wf.write(".data?\n")
-        wf.write(f"    mem db {program.memory_capacity} dup(?)\n")
+        wf.write(f"   mem db {program.memory_capacity} dup(?)\n")
+        # wf.write("    esi_temp db 4 DUP (0)  ; address to store esi\n")
         wf.write(".code\n")
         wf.write("    start PROC\n")
 
@@ -1450,41 +1359,9 @@ def compile_program(program : Program, outFilePath : str) -> None:
 
         wf.write("  start ENDP\n")
         wf.write("\n")
-        wf.write("  DUMP PROC             ; ARG: EDI pointer to string buffer ; EAX is the number to dump ; ECX,ESI,EBX is used\n")
-        wf.write("    mov ecx, eax\n")
-        wf.write("    shr ecx, 31\n")
-        wf.write("\n")
-        wf.write("    .if ecx == 1\n")
-        wf.write("      xor eax, 0FFFFFFFFh\n")
-        wf.write("      inc eax\n")
-        wf.write("      mov esi, 1\n")
-        wf.write("    .else\n")
-        wf.write("      mov esi,0\n")
-        wf.write("    .endif\n")
-        wf.write("\n")
-        wf.write("    mov ebx, 10             ; Divisor = 10\n")
-        wf.write("    xor ecx, ecx            ; ECX=0 (digit counter)\n")
-        wf.write("  @@:                       ; First Loop: store the remainders\n")
-        wf.write("    xor edx, edx\n")
-        wf.write("    div ebx                 ; EDX:EAX / EBX = EAX remainder EDX\n")
-        wf.write("    push dx                 ; push the digit in DL (LIFO)\n")
-        wf.write("    add cl,1                ; = inc cl (digit counter)\n")
-        wf.write("    or  eax, eax            ; AX == 0?\n")
-        wf.write("    jnz @B                  ; no: once more (jump to the first @@ above)\n")
-        wf.write("  @@:                       ; Second loop: load the remainders in reversed order\n")
-        wf.write("    pop ax                  ; get back pushed digits\n")
-        wf.write("    or al, 00110000b        ; to ASCII\n")
-        wf.write("    stosb                   ; Store AL to [EDI] (EDI is a pointer to a buffer)\n")
-        wf.write("    loop @B                 ; until there are no digits left\n")
-        wf.write("    mov byte ptr [edi], 0   ; ASCIIZ terminator (0)\n")
-        wf.write("  .if esi == 1\n")
-        wf.write("      invoke StdOut, addr negativeSign\n")
-        wf.write("  .endif\n")
-        wf.write("  invoke StdOut, addr decimalstr\n")
-        wf.write("  invoke StdOut, addr nl\n")
-        wf.write("  ret                     ; RET: EDI pointer to ASCIIZ-string\n")
-        wf.write("\n")
-        wf.write("  DUMP ENDP\n")
+        wf.write("  IDK_IF_THIS_FUNCTION_AINT_THERE_IT_BREAKS PROC\n")
+        wf.write("  ret\n")
+        wf.write("  IDK_IF_THIS_FUNCTION_AINT_THERE_IT_BREAKS ENDP\n")
         wf.write(content["procs"])
         wf.write("end start\n")
 
@@ -1560,7 +1437,7 @@ def simulate_program(program : Program, argv : List[str]) -> None:
             assert isinstance(op.operand, str)
             bs = bytes(op.operand, "utf-8")
             n = len(bs)
-            stack.append(n)
+            # stack.append(n)
             if i not in str_ptrs:
                 str_ptr = str_buf_ptr + str_size
                 str_ptrs[i] = str_ptr
@@ -1703,7 +1580,7 @@ def simulate_program(program : Program, argv : List[str]) -> None:
 
         elif op.type == OpType.INTRINSIC:
         
-            assert len(Intrinsic) == 29, f"Exaustive handling of Intrinsic's in Simulation {len(Intrinsic)}"
+            assert len(Intrinsic) == 30, f"Exaustive handling of Intrinsic's in Simulation {len(Intrinsic)}"
 
             if op.operand == Intrinsic.EXIT:
                 exit()
@@ -1775,6 +1652,17 @@ def simulate_program(program : Program, argv : List[str]) -> None:
                 stack.append(int(a < b))
                 i += 1
 
+            elif op.operand == Intrinsic.GTE:
+                b = stack.pop()
+                a = stack.pop()
+                stack.append(int(a >= b))
+                i += 1
+
+            elif op.operand == Intrinsic.LTE:
+                b = stack.pop()
+                a = stack.pop()
+                stack.append(int(a <= b))
+                i += 1
 
             elif op.operand == Intrinsic.DUP:
                 stack.append(stack[-1])
@@ -1798,11 +1686,6 @@ def simulate_program(program : Program, argv : List[str]) -> None:
                 temp = stack[-1]
                 stack[-1] = stack[-2]
                 stack[-2] = temp
-                i += 1
-
-            elif op.operand == Intrinsic.DUMP:
-                a = stack.pop()
-                print(a)
                 i += 1
 
             elif op.operand == Intrinsic.LOAD:
@@ -1924,6 +1807,7 @@ def main():
 
     includePaths = [".", "./std/"]
     timed = False
+    unsafe = False
 
     while len(argv) > 0:
         if argv[0] == "-I":
@@ -1936,6 +1820,9 @@ def main():
             includePaths.append(includePath)
         if argv[0] == "-t":
             timed = True
+            argv = argv[1:]
+        if argv[0] == "--unsafe" or argv[0] == "-u":
+            unsafe = True
             argv = argv[1:]
         else:
             break
@@ -1960,7 +1847,8 @@ def main():
             programBuildTime = time.time()
 
         print("[INFO] loaded program")
-        # type_check_program(program)
+        if not unsafe:
+            type_check_program(program)
         simulate_program(program, argv)
         if timed:
             print(f"[TIME] Run Time: {time.time() - programBuildTime} secs")
@@ -2005,7 +1893,8 @@ def main():
             start = time.time()
         program = load_program(programPath, includePaths)
         print("[INFO] loaded program")
-        # type_check_program(program)
+        if not unsafe:
+            type_check_program(program)
         compile_program(program,f"{basePath}.asm")
         print(f"[INFO] Generated {basePath}.asm")
         callCmd(["ml.exe","/Fo" ,f"{basePath}.obj", "/c", "/Zd", "/coff", f"{basePath}.asm"])

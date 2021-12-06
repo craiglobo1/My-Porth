@@ -1,33 +1,4 @@
 include "std.porth"
-memory dump_buffer
-    12
-end
 
-proc iprint int in
-    dup 31 shr 1 = dup if
-        swap 4294967295 bxor
-        1 + 
-    else
-        swap
-    end
-    
-    11 swap
 
-    dump_buffer 12 + '\n' !8
-    while dup 0 != do
-        10 divmod '0' +
-        2over dump_buffer  +
-        swap !8
-        swap 1 -
-        swap
-    end drop
-
-    swap if
-        dup dump_buffer + '-' !8
-    else
-        1 +
-    end
-    dump_buffer + stdout
-end
-
--12345 iprint
+-12345 dump

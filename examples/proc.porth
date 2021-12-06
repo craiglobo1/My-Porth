@@ -11,5 +11,34 @@ end
 
 proc number -- int in
     23 5 +
+end 
+
+
+memory a
+    12
 end
-world
+
+// 32 &a 32+a
+proc increment_by int ptr in
+    dup @32  2over + !32 drop
+end
+
+a 234 !32
+32 a increment_by
+a @32 dump
+
+
+memory hello 20 end
+
+// 12 *str *mem
+"Hello world\n" hello memcpy
+
+hello stdout
+
+
+
+
+
+
+
+

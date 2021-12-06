@@ -7,35 +7,132 @@ macro mod divmod swap drop end
 
 macro print stdout drop end
 
-macro !32 store32 end
-macro @32 load32 end
+macro store32 !32 end
+macro load32 @32 end
 
-macro !8 store8 end
-macro @8 load8 end
+macro store8 !8 end
+macro load8 @8 end
+
+macro sizeof(i32) 4 end
+macro sizeof(ptr) 4 end
+macro sizeof(char) 1 end
+
+
+memory dump_buffer
+    12
+end
+
+proc dump int in
+    dup 0 != if
+        dup 31 shr 1 = dup if
+            swap 4294967295 bxor
+            1 + 
+        else
+            swap
+        end
+        
+        11 swap
+
+        '\n' dump_buffer cast(int) 12 + cast(ptr) !8
+        while dup 0 != do
+            10 divmod '0' +
+            2over dump_buffer cast(int) + cast(ptr) !8
+            swap 1 -
+            swap
+        end drop
+
+        swap if
+            dup '-' dump_buffer cast(int) + cast(ptr) !8
+        else
+            1 +
+        end
+        dump_buffer cast(int) + cast(ptr) stdout
+    else
+        "0\n" stdout drop
+    end
+end
+
+proc strlen ptr -- int in
+    0 while over cast(int) over + cast(ptr) @8 0 != do
+    1 +
+    end swap drop
+end
 
 memory memcpy_size 4 end
 memory memcpy_src 4 end
 memory memcpy_dst 4 end
 
-//param: size dst src
-macro memcpy
-    memcpy_dst  swap !32
-    memcpy_src  swap !32
-    memcpy_size swap !32
+
+//param: &dst size &src
+proc memcpy ptr int ptr in
+    cast(int) memcpy_dst  !32
+    cast(int) memcpy_size !32
+    cast(int) memcpy_src  !32
 
     memcpy_dst @32
 
     0 while dup memcpy_size @32 < do
-        dup memcpy_src  @32 + @8
-        over memcpy_dst @32 + swap !8
+        dup memcpy_src @32 + cast(ptr) @8
+        over memcpy_dst @32 + cast(ptr) !8
         1 +
-    end drop
+    end drop drop
+end
+
+memory print_char_c 2 end
+
+proc print_char int in
+    print_char_c !8
+    print_char_c stdout
 end
 
 
+proc isNumericChar ptr -- bool in
+    dup cast(int) '0' 1 - > cast(int) over cast(int) '9' 1 + < cast(int) band swap drop cast(bool)
+end
+
+
+proc _not bool -- bool in
+    if 
+        0 cast(bool)
+    else
+        1 cast(bool)
+    end
+end
+
+// base val
+proc pow int int -- int in
+    dup 0 != if 
+        over swap
+        while dup 1 > do
+            swap 2over * swap 
+            1 -
+        end drop swap drop
+    else
+        drop drop 1
+    end
+end
+
+memory str_to_int_no1  4 end
+memory str_to_int_s1  4 end
+memory str_to_int_s1_len  4 end
+
+// s1 -- no1
+// ptr ptr
+proc str_to_int ptr -- int in
+    dup strlen 1 - str_to_int_s1_len !32
+    cast(int) str_to_int_s1 !32
+    str_to_int_s1_len @32 while dup -1 > do
+        dup str_to_int_s1 @32 + cast(ptr) @8 '0' -
+        over str_to_int_s1_len @32 swap - 10 swap pow *
+        str_to_int_no1 @32 + str_to_int_no1 !32
+    1 -
+    end drop
+    str_to_int_no1 @32
+    0 str_to_int_no1 !32
+end
+
 // param: fileName
-macro fopen
-    swap drop
+proc fopen ptr -- int in
     0 swap
     sysval "FILE_ATTRIBUTE_NORMAL" swap
     sysval "OPEN_ALWAYS" swap 
@@ -49,11 +146,11 @@ memory fwrite_fh 4 end
 memory fwrite_str_to_write 4 end
 memory fwrite_strlen 4 end
 
-// param: strlen, strToWrite, fileHandle
-macro fwrite
-    fwrite_fh swap !32
-    fwrite_str_to_write swap !32
-    fwrite_strlen swap !32
+// param: strToWrite, strlen, fileHandle
+proc fwrite ptr int int in
+    fwrite_fh !32
+    fwrite_strlen !32
+    cast(int) fwrite_str_to_write !32
     0
     0
     fwrite_strlen @32
@@ -65,25 +162,42 @@ end
 memory fread_fh 4 end
 memory fread_buffer 4 end
 memory fread_amt_to_read 4 end
+memory fread_lpBuffer 4 end
 
 // param: amtToRead, buffer, fileHandle
-macro fread
-    fread_fh swap !32
-    fread_buffer swap !32
-    fread_amt_to_read swap !32
+proc fread int ptr int -- int in
+              fread_fh          !32
+    cast(int) fread_buffer      !32
+              fread_amt_to_read !32
     0
-    0
+    fread_lpBuffer
     fread_amt_to_read @32
     fread_buffer @32
     fread_fh @32
-    syscall 5 "ReadFile" drop
+    syscall 5 "ReadFile" drop fread_lpBuffer @32
+end
+
+
+memory readLine_line_buffer_ptr 4 end
+memory readLine_cur_char 1 end
+memory readLine_fh 4 end
+
+proc readLine ptr int in
+    readLine_fh !32
+    cast(int) readLine_line_buffer_ptr !32
+    0 while readLine_cur_char @8 '\n' != do
+        1 readLine_cur_char readLine_fh @32 fread drop
+        dup readLine_line_buffer_ptr @32 + readLine_cur_char @8 swap cast(ptr) !8
+        1 +
+    end drop
+    0 readLine_cur_char !8
 end
 
 memory truncate_fh 4 end
 
 // param: fileHandle
-macro truncate
-    truncate_fh swap !32 //fh
+proc truncate int in
+    truncate_fh !32 //fh
     sysval "FILE_BEGIN"
     0
     0
@@ -95,7 +209,7 @@ macro truncate
 end
 
 // param: fileHandle
-macro fclose
+proc fclose int in
     syscall 1 "CloseHandle" drop
 end
 
@@ -103,10 +217,10 @@ memory set_fp_fh 4 end
 memory set_fp_move 4 end
 memory set_fp_amt_to_move 4 end
 // 
-macro set_fp
-    set_fp_fh swap !32 
-    set_fp_move swap !32 
-    set_fp_amt_to_move swap !32 
+proc set_fp int int int -- int in
+    set_fp_fh !32 
+    set_fp_move !32 
+    set_fp_amt_to_move !32 
     set_fp_move @32
     0
     set_fp_amt_to_move @32
@@ -114,8 +228,8 @@ macro set_fp
     syscall 4 "SetFilePointer"
 end
 
-macro getArgs
-syscall 0 "GetCommandLine"
+proc getArgsStr -- ptr in
+    syscall 0 "GetCommandLine"
 end
 
 

@@ -5,13 +5,13 @@ memory buffer 100 end
 
 
 "test_write.txt" fopen
-fh swap !32
+fh !32
 fh @32 truncate
-"Hello world" fh @32 fwrite
+"Hello world" dup strlen fh @32 fwrite
 fh @32 fclose
 
 "test_read.txt" fopen
-fh swap !32
-30 buffer fh @32 fread drop
+fh !32
+30 buffer fh @32 fread
 buffer stdout
 fh @32 fclose

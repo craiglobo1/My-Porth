@@ -5,9 +5,18 @@ else
     420 dump drop
 end
 
+34 35 + 70 = dup if
+    cast(int) dump
+end
+
 34 35 + 69 = dup if
     cast(int) dump
 else
     420 dump drop
 end
 
+34 34 < if 
+    "less " print
+else
+    "greater" print
+end
