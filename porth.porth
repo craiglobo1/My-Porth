@@ -1,0 +1,120 @@
+include "std.porth"
+
+memory offsetMem
+    sizeof(int)
+end
+
+
+// operand struct
+const op.type sizeof(int) offset end
+// const op.token sizeof(ptr) offset end
+const op.operand sizeof(int) offset end
+const sizeof(op) reset end
+
+// ops enum
+const optype.PUSH_INT 1 offset end
+const optype.DUMP 1 offset end
+const NO_OF_OPS reset end
+
+memory program // lst[op]
+    sizeof(op) 1000 *
+end
+memory program_top sizeof(int) end
+
+memory op_temp sizeof(op) end
+
+
+optype.PUSH_INT op_temp !32
+25 op_temp <int> op.operand + <ptr> !32
+
+
+sizeof(op) op_temp program memcpy
+
+optype.DUMP op_temp !32
+
+sizeof(op) op_temp program <int> sizeof(op) + <ptr> memcpy
+
+
+memory fh sizeof(ptr) end
+
+
+// fh str len &fh
+proc fputs ptr ptr in
+    swap dup strlen 2over @32 fwrite drop
+end
+
+
+
+proc compile_program ptr in
+    "porth_alt.asm" fopen fh !32
+    fh @32 truncate
+
+    ".386\n" fh fputs
+    ".model flat, stdcall\n" fh fputs
+    "option casemap:none\n" fh fputs
+    "include C:\\masm32\\include\\windows.inc\n" fh fputs
+    "include C:\\masm32\\include\\kernel32.inc\n" fh fputs
+    "include C:\\masm32\\include\\user32.inc\n" fh fputs
+    "include C:\\masm32\\include\\masm32.inc\n" fh fputs
+    "includelib C:\\masm32\\lib\\kernel32.lib\n" fh fputs
+    "includelib C:\\masm32\\lib\\user32.lib\n" fh fputs
+    "includelib C:\\masm32\\lib\\masm32.lib\n" fh fputs
+    ".data\n" fh fputs
+    "   aSymb db 97, 0\n" fh fputs
+    "   decimalstr db 16 DUP (0)\n" fh fputs
+    "   negativeSign db 45\n" fh fputs
+    "   nl DWORD 10\n" fh fputs
+    ".code\n" fh fputs
+    "   start PROC\n" fh fputs
+
+    "       push 10\n" fh fputs
+
+    "       pop eax\n" fh fputs
+
+
+    "       lea edi, decimalstr" fh fputs
+    "       call DUMP    \n" fh fputs
+    "       invoke StdOut, addr decimalstr\n" fh fputs
+    "       invoke StdOut, addr nl        \n" fh fputs
+    "   start ENDP\n\n" fh fputs
+
+    "  DUMP PROC\n" fh fputs
+    "    mov ecx, eax\n" fh fputs
+    "    shr ecx, 31\n\n" fh fputs
+
+    "    .if ecx == 1\n" fh fputs
+    "      xor eax, 0FFFFFFFFh\n" fh fputs
+    "      inc eax\n" fh fputs
+    "      mov esi, 1\n" fh fputs
+    "    .else\n" fh fputs
+    "      mov esi,0\n" fh fputs
+    "    .endif\n" fh fputs
+    "    mov ebx, 10             \n" fh fputs
+    "    xor ecx, ecx            \n" fh fputs
+    "  @@:                       \n" fh fputs
+    "    xor edx, edx\n" fh fputs
+    "    div ebx                 \n" fh fputs
+    "    push dx                 \n" fh fputs
+    "    add cl,1                \n" fh fputs
+    "    or  eax, eax            \n" fh fputs
+    "    jnz @B                  \n" fh fputs
+    "  @@:                       \n" fh fputs
+    "    pop ax                  \n" fh fputs
+    "    or al, 00110000b        \n" fh fputs
+    "    stosb                   \n" fh fputs
+    "    loop @B                 \n" fh fputs
+    "    mov byte ptr [edi], 0   \n" fh fputs
+    "  .if esi == 1\n" fh fputs
+    "      invoke StdOut, addr negativeSign\n" fh fputs
+    "  .endif\n" fh fputs
+
+    "  ret                           \n" fh fputs
+    "  DUMP ENDP\n" fh fputs
+
+
+    "end start\n" fh fputs
+
+    fh @32 fclose
+    drop
+end
+program compile_program

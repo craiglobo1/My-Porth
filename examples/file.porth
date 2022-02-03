@@ -1,17 +1,38 @@
 include "std.porth"
 
 memory fh 4 end
-memory buffer 100 end
-
-
-"test_write.txt" fopen
-fh !32
-fh @32 truncate
-"Hello world" dup strlen fh @32 fwrite
-fh @32 fclose
 
 "test_read.txt" fopen
 fh !32
-30 buffer fh @32 fread
-buffer stdout
+
+const LINE_SIZE 50 end
+memory line_buffer LINE_SIZE end
+
+0 while dup 31 < do 
+    line_buffer fh @32 readLine
+    line_buffer stdout
+    50 line_buffer free
+    1 +
+end drop
+
 fh @32 fclose
+
+
+// memory buffer 100 end
+
+
+// "test_write.txt" fopen
+// fh !32
+// fh @32 truncate
+// "Hello world" dup strlen fh @32 fwrite
+// fh @32 fclose
+
+// "test_read.txt" fopen
+// fh !32
+// 30 buffer fh @32 fread
+// buffer stdout
+// fh @32 fclose
+
+// include "std.porth"
+
+// memory fh 4 end

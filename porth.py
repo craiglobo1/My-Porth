@@ -1,3 +1,4 @@
+from importlib.machinery import OPTIMIZED_BYTECODE_SUFFIXES
 from io import FileIO
 import sys
 from enum import Enum,auto,IntEnum
@@ -18,6 +19,7 @@ class TokenType(Enum):
     CHAR = auto()
     KEYWORD = auto()
 
+# TODOOO: Implement let and peek functionality
 class Keyword(Enum):
     # blocks
     IF = auto()
@@ -35,6 +37,7 @@ class Keyword(Enum):
     BREAK = auto()
     TYPE_BREAK = auto()
     END = auto()
+    LET=auto()
     IN= auto()
     DASHDASH = auto()
 
@@ -66,6 +69,7 @@ class Intrinsic(Enum):
     LOAD = auto()
     STORE32 = auto()
     LOAD32 = auto()
+    MEMCPY = auto()
     # bitwise operations
     SHL= auto()
     SHR = auto()
@@ -91,15 +95,18 @@ class OpType(Enum):
     ELIF = auto()
     WHILE = auto()
     DO = auto()
+    BIND = auto()
+    PUSH_BIND = auto()
+    UNBIND = auto()
     END = auto()
     BREAK = auto()
-    TYPE_BREAK = auto()
+    TYPE_BREAK = auto() 
     INTRINSIC = auto()
     SKIP_PROC=auto()
     RET=auto()
     CALL=auto()
 
-assert len(Keyword) == 17, f"Exhaustive handling in KEYWORD NAMES {len(Keyword)}"
+assert len(Keyword) == 18, f"Exhaustive handling in KEYWORD NAMES {len(Keyword)}"
 KEYWORD_NAMES = {
     "if"    :   Keyword.IF,
     "else"  :   Keyword.ELSE,
@@ -113,7 +120,7 @@ KEYWORD_NAMES = {
     "include":  Keyword.INCLUDE,
     "syscall":  Keyword.SYSCALL,
     "sysval":  Keyword.SYSVAL,
-    # TODO: add break for typechecking
+    "let" : Keyword.LET,
     "break":  Keyword.BREAK,
     "tbreak":  Keyword.TYPE_BREAK,
     "end"   :   Keyword.END,
@@ -121,7 +128,7 @@ KEYWORD_NAMES = {
     "--"   :   Keyword.DASHDASH,
 }
 
-assert len(Intrinsic) == 30 , f"Exhaustive handling in INTRINSIC_WORDS {len(Intrinsic)}"
+assert len(Intrinsic) == 31 , f"Exhaustive handling in INTRINSIC_WORDS {len(Intrinsic)}"
 INTRINSIC_WORDS = {
     "stdout" : Intrinsic.STDOUT,
     "exit"  : Intrinsic.EXIT,
@@ -145,6 +152,7 @@ INTRINSIC_WORDS = {
     "@8"     : Intrinsic.LOAD,
     "!32":Intrinsic.STORE32,
     "@32": Intrinsic.LOAD32,
+    "memcpy" : Intrinsic.MEMCPY,
     "shl"   : Intrinsic.SHL,
     "shr"   : Intrinsic.SHR,
     "bor"   : Intrinsic.BOR,
@@ -214,8 +222,11 @@ class Op:
 class Program:
     ops : List[Op]
     procs : List[Proc]
+    lp_variables : List[Token]
+    lp_pointer : int = 0
     consts : Dict[str, int] = field(default_factory= lambda : {})
     memories : Dict[str, int] = field(default_factory= lambda: {})
+    offset_value : int = 0
     memory_capacity : int = 0
 
 
@@ -305,7 +316,7 @@ def compiler_error(loc: Loc, message: str, exits : bool = True):
 def compiler_note(loc: Loc, message: str, exits : bool = True):
     compiler_diagnostic(loc, 'NOTE', message,exits)
 
-def evaluate_constant_from_tokens(rtokens : List[Token], consts : Dict[str, int]) -> int:
+def evaluate_constant_from_tokens(rtokens : List[Token], consts : Dict[str, int], offsetValue : int) -> Tuple[int, int]:
     stack : List[int] = []
     while len(rtokens) > 0:
         token = rtokens.pop()
@@ -328,6 +339,13 @@ def evaluate_constant_from_tokens(rtokens : List[Token], consts : Dict[str, int]
                 a = stack.pop()
                 b = stack.pop()
                 stack.append(a*b)
+            elif token.value == "offset":
+                a = stack.pop()
+                stack.append(offsetValue)
+                offsetValue += a
+            elif token.value == "reset":
+                stack.append(offsetValue)
+                offsetValue = 0
             else:
                 print(consts)
                 sys.exit("%s:%d:%d unsupported word `%s` in constant evaluation" % (token.loc + (token.text,)))
@@ -336,13 +354,24 @@ def evaluate_constant_from_tokens(rtokens : List[Token], consts : Dict[str, int]
 
     if len(stack) != 1:
         sys.exit("%s:%d:%d memory definition expects one int" % token.loc)
-    return stack.pop()
+    return stack.pop(), offsetValue
 
+def read_till_breaker(rtokens : List[Token], breaker: str) -> Tuple[List[Token], List[Token]]:
+    tokens_till = []
+    while len(rtokens) > 0:
+        token = rtokens.pop()
 
+        if token.text == breaker:
+            return rtokens, tokens_till
+
+        tokens_till.append(token.value)
+    
+    compiler_error(tokens_till[0].loc, f"the keyword {breaker} is missing")
+            
 
 def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[]) -> Tuple[Program, Dict[str, OpAddr]]:
     stack : List[OpAddr] = []
-    program: Program = Program(ops=[], memory_capacity=0, procs=[])
+    program: Program = Program(ops=[], lp_variables=[], memory_capacity=0, procs=[])
     rtokens : List[Token] = list(reversed(tokens))
     macros: Dict[str, Macro] = {}
     current_proc : Optional[OpAddr] = None
@@ -381,6 +410,12 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                 op = Op(OpType.PUSH_INT, token, program.consts[token.value])
                 program.ops.append(op)
                 ip += 1
+            
+            elif token.value in program.lp_variables:
+                print(program.lp_variables, len(program.lp_variables) - 1 - program.lp_variables.index(token.value))
+                op = Op(OpType.PUSH_BIND, token, len(program.lp_variables) - 1 - program.lp_variables.index(token.value))
+                program.ops.append(op)
+                ip += 1
 
             elif token.value in map(lambda x : x.name , program.procs):
                 current_proc_found = list(filter(lambda x : x.name == token.value, program.procs))[0]
@@ -410,7 +445,7 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
             ip += 1
 
         elif token.type == TokenType.KEYWORD:
-            assert len(Keyword) == 17, "Exhaustive ops handling in compile_tokens_to_program. Only ops that form blocks must be handled"
+            assert len(Keyword) == 18, "Exhaustive ops handling in compile_tokens_to_program. Only ops that form blocks must be handled"
 
 
             if token.value == Keyword.WHILE:
@@ -487,7 +522,7 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                 elif program.ops[block_ip].type == OpType.IF:
                     program.ops.append(Op(OpType.END, token))
                     program.ops[ip].operand = ip + 1
-                    program.ops[block_ip].operand = block_ip + 1
+                    program.ops[block_ip].operand = ip + 1
                 
                 elif program.ops[block_ip].type == OpType.DO:
                     program.ops.append(Op(OpType.END, token))
@@ -514,6 +549,10 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                     program.ops[block_ip].operand.ret_ip = ip + 1
                     current_proc = None
                     # assert False, "Not implemented"
+                elif program.ops[block_ip].type == OpType.BIND:
+                    program.ops.append(Op(OpType.UNBIND, token, program.ops[block_ip].operand))
+                    program.lp_variables = program.lp_variables[program.ops[block_ip].operand:]
+
                 else:
                     compiler_error(program.ops[block_ip].token.loc, "`end` can only close `if`, `else`, `do`, `proc` or `macro` blocks for now")
                 ip += 1
@@ -597,7 +636,7 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                     compiler_error(token.loc, f"redefinition of an existing keyword of a memory `{token.value}`", exits=False)
                     # compiler_note(program.memories[token.value].loc, "the first definition is located here")
 
-                mem_size = evaluate_constant_from_tokens(rtokens, program.consts)
+                mem_size, program.offset_value = evaluate_constant_from_tokens(rtokens, program.consts, program.offset_value)
                 program.memories[memory_name] = program.memory_capacity
                 program.memory_capacity += mem_size
 
@@ -622,8 +661,33 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                 if const_name in program.memories:
                     compiler_error(token.loc, f"redefinition of an existing keyword of a memory `{token.value}`", exits=False)
                 
-                const_value = evaluate_constant_from_tokens(rtokens, program.consts)
+                const_value, program.offset_value = evaluate_constant_from_tokens(rtokens, program.consts, program.offset_value)
                 program.consts[const_name] = const_value
+            
+            
+            elif token.value == Keyword.LET:
+                if len(rtokens) == 0:
+                    compiler_error(token.loc, f"expected indentifer's name but found nothing")
+
+                const_name = token.value
+
+                if const_name in macros:
+                    assert isinstance(token.value, str)
+                    compiler_error(token.loc, f"redefinition of an existing keyword of a macro `{token.value}`", exits=False)
+                    compiler_note(macros[token.value].loc, f"the first definition is located here")
+
+                if const_name in INTRINSIC_WORDS:
+                    compiler_error(token.loc, f"redefinition of a builtin word `{token.value}`")
+
+                if const_name in program.memories:
+                    compiler_error(token.loc, f"redefinition of an existing keyword of a memory `{token.value}`", exits=False)
+
+                rtokens, lp_identifiers = read_till_breaker(rtokens, "in")
+                program.lp_variables = lp_identifiers + program.lp_variables
+                op = Op(type=OpType.BIND, token=token, operand=len(lp_identifiers))
+                program.ops.append(op)
+                stack.append(ip)
+                ip += 1
 
             elif token.value == Keyword.PROC:
                 if current_proc is None:
@@ -677,8 +741,8 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                 nestAmt = 0
                 while len(rtokens) > 0:
                     token = rtokens.pop()
-                    assert len(Keyword) == 17, f"Exaustive handling of keywords with `end` in compile_tokens_to_program for end type starters like Keyword.IF, Keyword.DO {len(Keyword)}"
-                    if token.type == TokenType.KEYWORD and token.value in [Keyword.IF, Keyword.WHILE, Keyword.PROC, Keyword.MEMORY, Keyword.CONST, Keyword.MACRO]:
+                    assert len(Keyword) == 18, f"Exaustive handling of keywords with `end` in compile_tokens_to_program for end type starters like Keyword.IF, Keyword.DO {len(Keyword)}"
+                    if token.type == TokenType.KEYWORD and token.value in [Keyword.IF, Keyword.WHILE, Keyword.PROC, Keyword.MEMORY, Keyword.CONST, Keyword.MACRO, Keyword.LET]:
                         nestAmt += 1
 
                     macro.tokens.append(token)
@@ -748,6 +812,31 @@ def type_check_contract(intro_token: Token, ctx: Context, contract: Contract):
     ctx.stack = stack
 
 
+def type_check_context_outs(ctx: Context):
+    while len(ctx.stack) > 0 and len(ctx.proc_outs) > 0:
+        actual_typ, actual_loc = ctx.stack.pop()
+        expected_typ, expected_loc = ctx.proc_outs.pop()
+        if expected_typ != actual_typ:
+            compiler_error(actual_loc, f"Unexpected type `{DATATYPE_NAMES[actual_typ]}` on the stack", exits=False)
+            compiler_note(expected_loc, f"Expected type `{DATATYPE_NAMES[expected_typ]}`")
+
+    if len(ctx.stack) > len(ctx.proc_outs):
+        top_typ, top_loc = ctx.stack.pop()
+        compiler_error(top_loc, f"Unhandled data on the stack:",exits=False)
+        compiler_note(top_loc, f"type `{DATATYPE_NAMES[top_typ]}`",exits=False)
+        while len(ctx.stack) > 0:
+            typ, loc = ctx.stack.pop()
+            compiler_note(loc, f"type `{DATATYPE_NAMES[typ]}`",exits=False)
+        exit(1)
+    elif len(ctx.stack) < len(ctx.proc_outs):
+        top_typ, top_loc = ctx.proc_outs.pop()
+        compiler_error(top_loc, f"Insufficient data on the stack. Expected:", exits=False)
+        compiler_note(top_loc, f"type `{DATATYPE_NAMES[top_typ]}`", exits=False)
+        while len(ctx.proc_outs) > 0:
+            typ, loc = ctx.proc_outs.pop()
+            compiler_note(loc, f"and type `{DATATYPE_NAMES[typ]}`", exits=False)
+        exit(1)
+
 def type_check_program(program : Program):
     """
     given a program it type checks the stack for each operation
@@ -757,9 +846,10 @@ def type_check_program(program : Program):
     breakpoint : bool = False
     
     for proc in program.procs:
-        contexts.append(Context(stack=copy(proc.contract.ins), ip=copy(proc.ip), proc_outs=copy(proc.contract.outs)))
+        cur_ctx = Context(stack=copy(proc.contract.ins), ip=copy(proc.ip), proc_outs=copy(proc.contract.outs))
+        contexts.append(cur_ctx)
 
-    assert len(OpType) == 17, f"Exhaustive handling of ops in type_check_program {len(OpType)}"
+    assert len(OpType) == 20, f"Exhaustive handling of ops in type_check_program {len(OpType)}"
     while len(contexts) > 0:
         ctx = contexts[-1]
         if ctx.ip >= len(program.ops):
@@ -778,6 +868,9 @@ def type_check_program(program : Program):
         elif op.type == OpType.PUSH_MEM:
             ctx.stack.append((DataType.PTR, op.token.loc))
             ctx.ip += 1
+        elif op.type == OpType.PUSH_BIND:
+            ctx.stack.append((DataType.INT, op.token.loc))
+            ctx.ip += 1
         elif op.type == OpType.SYSCALL:
             assert isinstance(op.operand, SyscallData)
             syscall = op.operand
@@ -792,14 +885,14 @@ def type_check_program(program : Program):
         elif op.type == OpType.IF:
             type_check_contract(op.token, ctx, Contract(ins=[(DataType.BOOL,  op.token.loc)], outs=[]))
             ctx.ip += 1
-            contexts.append(Context(stack=copy(ctx.stack), proc_outs=[], ip=op.operand))
+            contexts.append(Context(stack=copy(ctx.stack), proc_outs=copy(ctx.proc_outs), ip=op.operand))
             ctx = contexts[-1]
         elif op.type == OpType.ELSE:
             ctx.ip = op.operand
         elif op.type == OpType.ELIF:
             type_check_contract(op.token, ctx, Contract(ins=[(DataType.BOOL,  op.token.loc)], outs=[]))
             ctx.ip += 1
-            contexts.append(Context(stack=copy(ctx.stack), ip=op.operand))
+            contexts.append(Context(stack=copy(ctx.stack), proc_outs=copy(ctx.proc_outs), ip=op.operand))
             ctx = contexts[-1]
         elif op.type == OpType.WHILE:
             ctx.ip += 1
@@ -827,12 +920,22 @@ def type_check_program(program : Program):
                     exit(1)
                 else:
                     contexts.pop()
+            
+
             else:
                 visited_dos[ctx.ip] = copy(ctx.stack)
                 ctx.ip += 1
-                contexts.append(Context(stack=copy(ctx.stack), ip=op.operand, proc_outs=[]))
+                contexts.append(Context(stack=copy(ctx.stack), ip=op.operand, proc_outs=copy(ctx.proc_outs)))
                 ctx = contexts[-1]
 
+        elif op.type == OpType.BIND:
+            for i in range(op.operand):
+                ctx.stack.pop()
+            ctx.ip += 1
+
+        elif op.type == OpType.UNBIND:
+            ctx.ip += 1
+    
         elif op.type == OpType.END:
             assert isinstance(op.operand, OpAddr)
             ctx.ip = op.operand
@@ -852,10 +955,11 @@ def type_check_program(program : Program):
             ctx.ip += 1
 
         elif op.type == OpType.RET:
+            type_check_context_outs(ctx)
             contexts.pop()
 
         elif op.type == OpType.INTRINSIC:
-            assert len(Intrinsic) == 30, f"Exhaustive handling of Intrinsics in type_check_program {len(Intrinsic)}"
+            assert len(Intrinsic) == 31, f"Exhaustive handling of Intrinsics in type_check_program {len(Intrinsic)}"
                 # win32 api operations
             if op.operand == Intrinsic.STDOUT:
                 type_check_contract(op.token, ctx, Contract(ins=[(DataType.PTR,  op.token.loc)], outs=[]))                 
@@ -985,6 +1089,10 @@ def type_check_program(program : Program):
                 type_check_contract(op.token, ctx, Contract(ins=[(DataType.PTR,  op.token.loc)], outs=[(DataType.INT,  op.token.loc)]))
                 ctx.ip += 1
 
+            elif op.operand == Intrinsic.MEMCPY:
+                type_check_contract(op.token, ctx, Contract(ins=[(DataType.INT, op.token.loc), (DataType.PTR , op.token.loc) , (DataType.PTR, op.token.loc)], outs=[]))
+                ctx.ip += 1
+
             elif op.operand == Intrinsic.SHL:
                 type_check_contract(op.token, ctx, Contract(ins=[(DataType.INT,  op.token.loc), (DataType.INT,  op.token.loc)], outs=[(DataType.INT,  op.token.loc)]))
                 ctx.ip += 1
@@ -1057,7 +1165,7 @@ def compile_program(program : Program, outFilePath : str) -> None:
     #add implementation of logic
     for i, op in enumerate(program.ops):
         content[writer] += "\n" + 3*"  " +  f"addr_{i}:\n"
-        assert len(OpType) == 17, f"Exhaustive handling of operations whilst compiling {len(OpType)}"
+        assert len(OpType) == 20, f"Exhaustive handling of operations whilst compiling {len(OpType)}"
 
         if op.type == OpType.PUSH_INT:
             valToPush = op.operand
@@ -1079,6 +1187,34 @@ def compile_program(program : Program, outFilePath : str) -> None:
             content[writer] += f"      lea edi, mem\n"
             content[writer] += f"      add edi, {op.operand}\n"
             content[writer] += f"      push edi\n"
+
+        elif op.type == OpType.PUSH_BIND:
+            # assert False, "Not Implemented"
+            bind_offset : int = op.operand
+            content[writer] += f"      lea edi, bindStack\n"
+            content[writer] += f"      add edi, {bind_offset*4}\n"
+            content[writer] += f"      mov eax, [edi]\n"
+            content[writer] += f"      push eax\n"
+
+        elif op.type == OpType.BIND:
+            vals_to_bind : int = op.operand
+            for i in range(vals_to_bind):
+                content[writer] += f"      pop eax\n"
+                content[writer] += f"      lea edi, bindStack\n"
+                content[writer] += f"      add edi, {i*4+program.lp_pointer*4}\n"
+
+                content[writer] += "      mov  [edi], eax\n" # stores stack val in bindstack
+            program.lp_pointer += vals_to_bind
+
+        elif op.type == OpType.UNBIND:
+            vals_to_bind : int = op.operand
+            program.lp_pointer -= vals_to_bind
+            for i in range(vals_to_bind):
+                content[writer] += f"      lea edi, bindStack\n"
+                content[writer] += f"      add edi, {i*4+program.lp_pointer*4}\n"
+                content[writer] += f"      mov eax, 0\n"
+                content[writer] += f"      mov  [edi], eax\n" # stores stack val in bindstack
+
 
         elif op.type == OpType.SYSCALL:
             assert isinstance(op.operand, SyscallData)
@@ -1157,7 +1293,7 @@ def compile_program(program : Program, outFilePath : str) -> None:
             for i in range(len(op.operand.contract.outs)):
                 content[writer] += f"      push {call_reg_order[i]}\n"
 
-        assert len(Intrinsic) == 30, f"Exaustive handling of Intrinsic's in Compiling {len(Intrinsic)}"
+        assert len(Intrinsic) == 31, f"Exaustive handling of Intrinsic's in Compiling {len(Intrinsic)}"
         if op.type == OpType.INTRINSIC:
 
             if op.operand == Intrinsic.STDOUT:
@@ -1348,6 +1484,16 @@ def compile_program(program : Program, outFilePath : str) -> None:
                 content[writer] += "      pop  ebx\n" #int
                 content[writer] += "      mov  [eax], ebx\n"
 
+            # size from to
+            if op.operand == Intrinsic.MEMCPY:
+                content[writer] += "      cld\n"
+                content[writer] += "      pop edi\n"
+                content[writer] += "      pop esi\n"
+                content[writer] += "      pop eax\n"
+                content[writer] += "      mov ecx, eax\n"
+                content[writer] += "      rep movsb\n"
+
+
             if op.operand == Intrinsic.SHL:
                 content[writer] += "      ;-- shl --\n"
                 content[writer] += "      pop ecx\n"
@@ -1403,6 +1549,7 @@ def compile_program(program : Program, outFilePath : str) -> None:
 
         wf.write(".data?\n")
         wf.write(f"   mem db {program.memory_capacity} dup(?)\n")
+        wf.write(f"   bindStack db 80 dup(?)\n")
         # wf.write("    esi_temp db 4 DUP (0)  ; address to store esi\n")
         wf.write(".code\n")
         wf.write("    start PROC\n")

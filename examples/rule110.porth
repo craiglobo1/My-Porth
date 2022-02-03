@@ -5,7 +5,7 @@ include "std.porth"
 macro BOARD_SIZE 100 end
 memory mem 100 100 * end
 
-mem BOARD_SIZE 2 - + 1 .
+mem <int> BOARD_SIZE 2 - + <ptr> 1 .
 
 
 0 while dup BOARD_SIZE  2 - < do

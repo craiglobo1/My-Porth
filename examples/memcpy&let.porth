@@ -1,0 +1,14 @@
+include "std.porth"
+
+10 20 30
+let a b c in
+    a dump
+    40 50
+    let d e in
+        "----------------\n" print
+        a dump b dump c dump d dump e dump
+        "----------------\n" print
+    end 
+    b dump
+    c dump
+end

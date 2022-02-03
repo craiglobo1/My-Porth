@@ -1,7 +1,7 @@
 proc _div int int -- int in divmod drop end
 proc _mod int int -- int in divmod swap drop end
 
-macro print stdout drop end
+macro print stdout end
 
 macro store32 !32 end
 macro load32 @32 end
@@ -9,13 +9,15 @@ macro load32 @32 end
 macro store8 !8 end
 macro load8 @8 end
 
+proc @p32 ptr -- ptr in @32 <ptr> end
+
 macro cast(int) <int> end
 macro cast(ptr) <ptr> end
 macro cast(bool) <bool> end
 
-macro sizeof(i32) 4 end
-macro sizeof(ptr) 4 end
-macro sizeof(char) 1 end
+const sizeof(int) 4 end
+const sizeof(ptr) 4 end
+const sizeof(char) 1 end
 
 
 memory dump_buffer
@@ -77,25 +79,25 @@ proc free int ptr in
     end drop
 end
 
-memory memcpy_size 4 end
-memory memcpy_src 4 end
-memory memcpy_dst 4 end
+// memory memcpy_size 4 end
+// memory memcpy_src 4 end
+// memory memcpy_dst 4 end
 
 
-//param: &dst size &src
-proc memcpy ptr int ptr in
-    <int> memcpy_dst  !32
-    <int> memcpy_size !32
-    <int> memcpy_src  !32
+// //param: &src size &dst
+// proc memcpy ptr int ptr in
+//     <int> memcpy_dst  !32
+//     <int> memcpy_size !32
+//     <int> memcpy_src  !32
 
-    memcpy_dst @32
+//     memcpy_dst @32
 
-    0 while dup memcpy_size @32 < do
-        dup memcpy_src @32 + <ptr> @8
-        over memcpy_dst @32 + <ptr> !8
-        1 +
-    end drop drop
-end
+//     0 while dup memcpy_size @32 < do
+//         dup memcpy_src @32 + <ptr> @8
+//         over memcpy_dst @32 + <ptr> !8
+//         1 +
+//     end drop drop
+// end
 
 memory print_char_c 2 end
 
@@ -251,7 +253,7 @@ proc set_fp int int int -- int in
 end
 
 proc getArgsStr -- ptr in
-    syscall 0 "GetCommandLine"
+    syscall 0 "GetCommandLine" <ptr>
 end
 
 

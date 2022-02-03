@@ -1,18 +1,37 @@
 include "std.porth"
 
-memory fh 4 end
 
-"test_read.txt" fopen
-fh !32
+// seperator str itemSize buffer
+memory split_sep sizeof(char) end
+memory split_string sizeof(ptr) end
+memory split_size sizeof(int) end
+memory split_buf sizeof(ptr) end
+memory split_buf_top sizeof(int) end
+memory split_cur_char sizeof(char) end
+proc split_str int ptr int ptr in
+     <int>  split_buf !32
+            split_size !32
+     <int>  split_string !32
+            split_sep  !8
+    split_string @p32 @8 split_cur_char !8
+    -1 0 while split_cur_char @8 0 != do
+    dup split_string @32 + <ptr>  @8 split_cur_char !8 // get cur char of string
+    // oldsep i 
+    split_cur_char @8 split_sep @8 = if
+        over 1 + split_string @32 + <ptr> //&src
+        2over 2over 1 - swap - dup dump //size
+        split_buf <int> split_buf_top @32 + <ptr> // des
+        // memcpy 
+        drop drop drop
+        swap drop dup
+        split_buf_top @32 split_size @32 + split_buf_top !32
+        // split_buf_top @32 dup dump split_size @32 dup dump + split_buf_top !32
+    end
 
-const LINE_SIZE 50 end
-memory line_buffer LINE_SIZE end
-
-0 while dup 31 < do 
-    line_buffer fh @32 readLine
-    line_buffer stdout
-    50 line_buffer free
     1 +
-end drop
+    end drop drop
+end
 
-fh @32 fclose
+memory numbers 5 100 * end
+
+',' "32,52,7,123,46" 5 numbers split_str

@@ -1,16 +1,16 @@
 include "std.porth"
 
 proc hello in
-    "hello\n" print
+    "hello\n" stdout
 end
 
 proc world in
     hello
-    "world\n" print
+    "world\n" stdout
 end
 
 proc number -- int in
-    23 5 +
+    23 5 + 10 +
 end 
 
 
@@ -18,12 +18,12 @@ memory a
     12
 end
 
-// 32 &a 32+a
+// int ptr *ptr+int
 proc increment_by int ptr in
-    dup @32  2over + !32 drop
+    dup @32 2over + swap !32 drop
 end
 
-a 234 !32
+234 a !32
 32 a increment_by
 a @32 dump
 
@@ -31,12 +31,9 @@ a @32 dump
 memory hello 20 end
 
 // 12 *str *mem
-"Hello world\n" hello memcpy
+"Hello world\n" dup strlen hello memcpy
 
 hello stdout
-
-
-
 
 
 
