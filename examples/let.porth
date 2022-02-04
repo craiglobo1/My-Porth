@@ -1,0 +1,32 @@
+include "std.porth"
+
+
+"a\n" "b\n" "c\n"
+let a b c in
+    a stdout b stdout c stdout
+    "d\n" "e\n"
+    let d e in
+        d stdout e stdout
+    end
+end
+
+
+// bug testing Fix bindings for procedure call in procedure defitions 
+memory testBuf 200 end
+proc testLet int int in
+    let a b in
+        a 20 +
+        b 20 +
+    end
+    drop drop 
+end
+
+proc testTwo ptr in
+    let buf in
+        buf <int> dump
+        buf <int> dump
+        10 20  testLet 
+    end
+end
+
+testBuf testTwo

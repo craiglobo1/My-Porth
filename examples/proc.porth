@@ -34,8 +34,3 @@ memory hello 20 end
 "Hello world\n" dup strlen hello memcpy
 
 hello stdout
-
-
-
-
-

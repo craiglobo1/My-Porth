@@ -27,6 +27,7 @@ const TK_WORD 1 offset end
 const TK_INT 1 offset end
 const NO_OF_TK_TYPS reset end 
 
+//Arrays
 memory program     sizeof(op) 1000 * end
 memory program_len sizeof(int)       end
 
@@ -50,30 +51,31 @@ const LINE_SIZE 200 end
 memory lineBuffer LINE_SIZE end
 memory charBuffer 4 end
 
-proc testLet int int int -- int int int in
-    let a b c in
+proc testLet int int in
+    let a b in
         a 20 +
         b 20 +
-        c 20 +
     end
+    drop drop 
 end
 
 proc lex_line ptr in
-    let lBuffer in
-        lBuffer <int> dump
-        10 20 30 testLet
-        lBuffer <int> dump
-        drop drop drop
+    let buf in
         0 while 1 charBuffer fh @32 fread charBuffer @8 '\n' != land  do
             charBuffer stdout
-            // charBuffer @8 lBuffer 2over ptr+ !8
+            charBuffer @8 buf 2over ptr+ !8
             1 +
         end drop
+        
     end
 end
 
+
 proc lex_file ptr in
     fopen fh !32
+    lineBuffer lex_line
+    lineBuffer stdout
+    "\n" stdout
     lineBuffer lex_line
     lineBuffer stdout
     fh @32 fclose
@@ -137,20 +139,20 @@ proc compile_program ptr in
     "    .endif\n" fh fputs
     "    mov ebx, 10             \n" fh fputs
     "    xor ecx, ecx            \n" fh fputs
-    "  @@:                       \n" fh fputs
+    "  @@        :  \n" fh fputs
     "    xor edx, edx\n" fh fputs
     "    div ebx                 \n" fh fputs
     "    push dx                 \n" fh fputs
     "    add cl,1                \n" fh fputs
     "    or  eax, eax            \n" fh fputs
     "    jnz @B                  \n" fh fputs
-    "  @@:                       \n" fh fputs
+    "  @@        :  \n" fh fputs
     "    pop ax                  \n" fh fputs
     "    or al, 00110000b        \n" fh fputs
     "    stosb                   \n" fh fputs
     "    loop @B                 \n" fh fputs
     "    mov byte ptr [edi], 0   \n" fh fputs
-    "  .if esi == 1\n" fh fputs
+    "  .if esi   == 1\n" fh fputs
     "      invoke StdOut, addr negativeSign\n" fh fputs
     "  .endif\n" fh fputs
 

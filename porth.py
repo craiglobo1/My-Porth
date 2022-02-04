@@ -447,9 +447,6 @@ def type_check_program(program : Program):
         elif op.type == OpType.PUSH_MEM:
             ctx.stack.append((DataType.PTR, op.token.loc))
             ctx.ip += 1
-        elif op.type == OpType.PUSH_BIND:
-            ctx.stack.append(ctx.lp_stack[op.operand])
-            ctx.ip += 1
         elif op.type == OpType.SYSCALL:
             assert isinstance(op.operand, SyscallData)
             syscall = op.operand
@@ -506,6 +503,10 @@ def type_check_program(program : Program):
                 ctx.ip += 1
                 contexts.append(Context(stack=copy(ctx.stack), lp_stack=copy(ctx.lp_stack), ip=op.operand, proc_outs=copy(ctx.proc_outs)))
                 ctx = contexts[-1]
+
+        elif op.type == OpType.PUSH_BIND:
+            ctx.stack.append(ctx.lp_stack[-op.operand])
+            ctx.ip += 1
 
         elif op.type == OpType.BIND:
             bindings = []
@@ -816,7 +817,9 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                 ip += 1
             
             elif token.value in program.lp_variables:
-                op = Op(OpType.PUSH_BIND, token, len(program.lp_variables) - 1 - program.lp_variables.index(token.value))
+                bindIdx = len(program.lp_variables) - program.lp_variables.index(token.value)
+                print(program.lp_variables, bindIdx, program.lp_variables[-bindIdx])
+                op = Op(OpType.PUSH_BIND, token, bindIdx)
                 program.ops.append(op)
                 ip += 1
 
@@ -1086,7 +1089,7 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                     compiler_error(token.loc, f"redefinition of an existing keyword of a memory `{token.value}`", exits=False)
 
                 rtokens, lp_identifiers = read_till_breaker(rtokens, "in", token.loc)
-                program.lp_variables = lp_identifiers + program.lp_variables
+                program.lp_variables += lp_identifiers[::-1]
                 op = Op(type=OpType.BIND, token=token, operand=len(lp_identifiers))
                 program.ops.append(op)
                 stack.append(ip)
@@ -1094,7 +1097,6 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
 
             elif token.value == Keyword.PROC:
                 if current_proc is None:
-
 
                     if len(rtokens) == 0:
                         compiler_error(token.loc, "expected procedure name but found nothing")
@@ -1181,8 +1183,6 @@ def load_program(file_path : str ,includePaths : List[str]=[]) -> Program:
     program : Program  = compile_tokens_to_program(tokens, includePaths)
     return program
 
-
-
 def compile_program(program : Program, outFilePath : str) -> None:
     content : Dict[str:str] = {"main" : "", "procs" : "", "strs" : ""}
     current_proc = ""
@@ -1220,30 +1220,33 @@ def compile_program(program : Program, outFilePath : str) -> None:
             # assert False, "Not Implemented"
             bind_offset : int = op.operand
             content[writer] += f"      lea edi, bindStack\n"
-            content[writer] += f"      add edi, {bind_offset*4}\n"
+            content[writer] += f"      add edi, [bindPtr]\n"
+            content[writer] += f"      sub edi, {bind_offset*4}\n"
             content[writer] += f"      mov eax, [edi]\n"
             content[writer] += f"      push eax\n"
 
 
-        # TODOOO: Fix bindings for procedure call in procedure defitions 
         elif op.type == OpType.BIND:
             vals_to_bind : int = op.operand
+            content[writer] += f"      lea edi, bindStack\n"
+            content[writer] += f"      add edi, [bindPtr]\n"
             for i in range(vals_to_bind):
+                # content[writer] += f"      add bindPtr, {vals_to_bind} eax\n"
                 content[writer] += f"      pop eax\n"
-                content[writer] += f"      lea edi, bindStack\n"
-                content[writer] += f"      add edi, {i*4+program.lp_pointer*4}\n"
+                content[writer] += f"      mov [edi], eax\n" # stores stack val in bindstack
+                content[writer] += f"      add edi, 4\n"
+            content[writer] += f"      add bindPtr, {vals_to_bind*4}\n"
 
-                content[writer] += "      mov  [edi], eax\n" # stores stack val in bindstack
-            program.lp_pointer += vals_to_bind
 
         elif op.type == OpType.UNBIND:
             vals_to_bind : int = op.operand
-            program.lp_pointer -= vals_to_bind
+            content[writer] += f"      mov eax, 0\n"
+            content[writer] += f"      lea edi, bindStack\n"
+            content[writer] += f"      add edi, [bindPtr]\n"
             for i in range(vals_to_bind):
-                content[writer] += f"      lea edi, bindStack\n"
-                content[writer] += f"      add edi, {i*4+program.lp_pointer*4}\n"
-                content[writer] += f"      mov eax, 0\n"
+                content[writer] += f"      sub edi, 4\n"
                 content[writer] += f"      mov  [edi], eax\n" # stores stack val in bindstack
+            content[writer] += f"      sub bindPtr, {vals_to_bind*4}\n"
 
 
         elif op.type == OpType.SYSCALL:
@@ -1582,6 +1585,7 @@ def compile_program(program : Program, outFilePath : str) -> None:
         wf.write("includelib C:\masm32\lib\masm32.lib\n")
         wf.write(".data\n")
         wf.write("    aSymb db 97, 0\n")
+        wf.write(f"   bindPtr dd 0 \n")
 
         wf.write(content["strs"])
 

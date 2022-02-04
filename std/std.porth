@@ -31,6 +31,9 @@ proc land bool bool -- bool in
     <int> swap <int> band <bool>
 end
 
+proc getTime -- int  in
+    syscall 0 "GetTickCount"
+end
 
 proc dump int in
     dup 0 != if
