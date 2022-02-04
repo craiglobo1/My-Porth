@@ -1,5 +1,11 @@
 include "std.porth"
 
+memory hello 20 end
+
+// 12 *str *mem
+12 "Hello world\n" hello memcpy
+hello stdout
+
 10 20 30
 let a b c in
     a dump
@@ -12,3 +18,23 @@ let a b c in
     b dump
     c dump
 end
+
+"\n----------------\n" print
+"----------------\n\n" print
+
+"craig\n" 20 30
+let a b c in
+    a stdout
+    b dump
+    c dump
+    40 "clyde"
+    let d e in
+        "---------------\n" stdout
+        a stdout
+        b dump
+        c dump
+        d dump
+        e stdout
+    end
+end
+

@@ -24,6 +24,13 @@ memory dump_buffer
     12
 end
 
+proc lor bool bool -- bool in
+    <int> swap <int> bor <bool>
+end
+proc land bool bool -- bool in
+    <int> swap <int> band <bool>
+end
+
 
 proc dump int in
     dup 0 != if
@@ -60,6 +67,30 @@ proc strlen ptr -- int in
     0 while over <int> over + <ptr> @8 0 != do
     1 +
     end swap drop
+end
+
+proc streq ptr ptr -- bool in
+    let s1 s2 in
+        s1 strlen s2 strlen = if
+            1 <bool> 0 while s1 over ptr+ @8 0 != do
+                s1 over ptr+ @8   s2 2over ptr+ @8 != if 
+                    swap drop 0 <bool> swap
+                end
+                1 +
+            end drop
+        else
+            0 <bool>
+        end
+    end
+end
+
+proc append ptr ptr in
+    let s1 s2 in
+        s1 strlen s2 strlen
+        let n1 n2 in
+            n2 s2 s1 n1 ptr+ memcpy
+        end
+    end
 end
 
 memory free_size 4 end
@@ -180,22 +211,26 @@ proc fwrite ptr int int in
     syscall 5 "WriteFile" drop
 end
 
-memory fread_fh 4 end
-memory fread_buffer 4 end
-memory fread_amt_to_read 4 end
-memory fread_lpBuffer 4 end
+proc fputs ptr ptr in
+    swap dup strlen 2over @32 fwrite drop
+end
+
+memory fread_bytes_read 4 end
 
 // param: amtToRead, buffer, fileHandle
-proc fread int ptr int -- int in
-              fread_fh          !32
-    <int> fread_buffer      !32
-              fread_amt_to_read !32
-    0
-    fread_lpBuffer
-    fread_amt_to_read @32
-    fread_buffer @32
-    fread_fh @32
-    syscall 5 "ReadFile" drop fread_lpBuffer @32
+proc fread int ptr int -- bool in
+    let amtToRead buffer fileHandle in
+        0
+        fread_bytes_read
+        amtToRead
+        buffer
+        fileHandle
+        syscall 5 "ReadFile" 0 != fread_bytes_read @32 0 = land if
+            0 <bool>
+        else
+            1 <bool>
+        end
+    end
 end
 
 

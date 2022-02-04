@@ -1,9 +1,6 @@
 include "std.porth"
 
-memory offsetMem
-    sizeof(int)
-end
-
+memory fh sizeof(ptr) end
 
 // operand struct
 const op.type sizeof(int) offset end
@@ -12,37 +9,77 @@ const op.operand sizeof(int) offset end
 const sizeof(op) reset end
 
 // ops enum
-const optype.PUSH_INT 1 offset end
-const optype.DUMP 1 offset end
+const OP_PUSH_INT 1 offset end
+const OP_DUMP 1 offset end
 const NO_OF_OPS reset end
 
-memory program // lst[op]
-    sizeof(op) 1000 *
-end
-memory program_top sizeof(int) end
+const TK_SIZE 50 end
+
+// operand struct
+const token.type sizeof(int) offset end
+// const op.token sizeof(ptr) offset end
+const token.text TK_SIZE offset end
+const sizeof(token) reset end
+
+
+// token enum
+const TK_WORD 1 offset end
+const TK_INT 1 offset end
+const NO_OF_TK_TYPS reset end 
+
+memory program     sizeof(op) 1000 * end
+memory program_len sizeof(int)       end
+
+memory tokens sizeof(op) 1000 * end
+memory tokens_len sizeof(int)       end
 
 memory op_temp sizeof(op) end
 
 
-optype.PUSH_INT op_temp !32
-25 op_temp <int> op.operand + <ptr> !32
-
-
+OP_PUSH_INT op_temp !32
+25 op_temp op.operand ptr+ !32
 sizeof(op) op_temp program memcpy
 
-optype.DUMP op_temp !32
-
+OP_DUMP op_temp !32
 sizeof(op) op_temp program <int> sizeof(op) + <ptr> memcpy
 
+2 program_len !32
 
-memory fh sizeof(ptr) end
+const LINE_SIZE 200 end 
 
+memory lineBuffer LINE_SIZE end
+memory charBuffer 4 end
 
-// fh str len &fh
-proc fputs ptr ptr in
-    swap dup strlen 2over @32 fwrite drop
+proc testLet int int int -- int int int in
+    let a b c in
+        a 20 +
+        b 20 +
+        c 20 +
+    end
 end
 
+proc lex_line ptr in
+    let lBuffer in
+        lBuffer <int> dump
+        10 20 30 testLet
+        lBuffer <int> dump
+        drop drop drop
+        0 while 1 charBuffer fh @32 fread charBuffer @8 '\n' != land  do
+            charBuffer stdout
+            // charBuffer @8 lBuffer 2over ptr+ !8
+            1 +
+        end drop
+    end
+end
+
+proc lex_file ptr in
+    fopen fh !32
+    lineBuffer lex_line
+    lineBuffer stdout
+    fh @32 fclose
+end
+
+"examples\\math.porth" lex_file
 
 
 proc compile_program ptr in
@@ -67,15 +104,24 @@ proc compile_program ptr in
     ".code\n" fh fputs
     "   start PROC\n" fh fputs
 
-    "       push 10\n" fh fputs
+    0 while dup program_len @32 <  do
+        program over sizeof(op) * ptr+ 
+        let op in
+            op op.type ptr+ @32 OP_PUSH_INT = if 
+                "       push 10\n" fh fputs
+                "       pop eax\n" fh fputs
 
-    "       pop eax\n" fh fputs
+            else op op.type ptr+ @32 OP_DUMP = elif
+                "       lea edi, decimalstr\n" fh fputs
+                "       call DUMP    \n" fh fputs
+                "       invoke StdOut, addr decimalstr\n" fh fputs
+                "       invoke StdOut, addr nl        \n" fh fputs
+            end
+        end 
+        1 +
 
+    end drop
 
-    "       lea edi, decimalstr" fh fputs
-    "       call DUMP    \n" fh fputs
-    "       invoke StdOut, addr decimalstr\n" fh fputs
-    "       invoke StdOut, addr nl        \n" fh fputs
     "   start ENDP\n\n" fh fputs
 
     "  DUMP PROC\n" fh fputs

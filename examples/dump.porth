@@ -1,4 +1,37 @@
-include "std.porth"
+memory dump_buffer
+    12
+end
 
+
+proc dump int in
+    dup 0 != if
+        
+        dup 31 shr 1 = dup if
+            swap 4294967295 bxor
+            1 + 
+        else
+            swap
+        end
+        
+        '\n' dump_buffer <int> 11 + <ptr> !8
+
+        10 swap
+        while dup 0 != do
+            10 divmod '0' + 
+            2over dump_buffer <int> + <ptr> !8
+            swap 1 -
+            swap
+        end drop
+
+        swap if
+            dup dump_buffer <int> + <ptr> '-' swap !8
+        else
+            1 +
+        end
+        dump_buffer <int> + <ptr> stdout
+    else
+        "0\n" stdout drop
+    end
+end
 
 -12345 dump
