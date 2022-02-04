@@ -46,6 +46,8 @@ sizeof(op) op_temp program <int> sizeof(op) + <ptr> memcpy
 
 2 program_len !32
 
+
+
 const LINE_SIZE 200 end 
 
 memory lineBuffer LINE_SIZE end
@@ -65,7 +67,7 @@ proc lex_line ptr in
             charBuffer stdout
             charBuffer @8 buf 2over ptr+ !8
             1 +
-        end drop
+        end dro
         
     end
 end

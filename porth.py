@@ -216,6 +216,8 @@ class Proc:
     name : str
     ip : int
     contract : Contract
+    local_mems : Dict[str, int]
+    local_mem_cap : int = 0
     ret_ip : int = 0
 
 @dataclass
@@ -225,13 +227,18 @@ class Op:
     operand: Optional[Union[int, str, Intrinsic, OpAddr, SyscallData, Proc]] = None
 
 @dataclass
+class MemData:
+    name : str
+    addr : int
+    space : str = "global"
+
+@dataclass
 class Program:
     ops : List[Op]
     procs : List[Proc]
     lp_variables : List[Token]
-    lp_pointer : int = 0
     consts : Dict[str, int] = field(default_factory= lambda : {})
-    memories : Dict[str, int] = field(default_factory= lambda: {})
+    memories : List[MemData] = field(default_factory= lambda: [])
     offset_value : int = 0
     memory_capacity : int = 0
 
@@ -311,7 +318,7 @@ def readable_enum(enum_val):
 #---------------------------- Compliler Errors ----------------------------
 
 def compiler_diagnostic(loc: Loc, tag: str, message: str, exits : bool =True):
-    print("%s:%d:%d: %s: %s" % (loc + (tag, message)), file=sys.stderr)
+    print("./%s:%d:%d: %s: %s" % (loc + (tag, message)), file=sys.stderr)
     if exits:
         exit(1)
 
@@ -772,6 +779,34 @@ def parse_proc_contract(rtokens : List[Token]) -> Contract:
     assert stopper == Keyword.IN
     return contract
 
+
+def check_word_redefinition(token : Token, current_proc : Optional[Proc], program : Program, macros : List[Macro]):
+    name = token.value
+
+    if name in INTRINSIC_WORDS:
+        compiler_error(token.loc, f"redefinition of a builtin word `{name}`")
+
+    # for global variables
+    if  current_proc is None and name in [ val.name for val in program.memories if val.space == "global"]:
+        compiler_error(token.loc, f"redefinition of an memory keyword `{name}`")
+    elif current_proc is not None:
+        if name in [ val.name for val in program.memories if val.space == "global" or val.space == current_proc.name]:
+            compiler_error(token.loc, f"redefinition of an memory keyword `{name}`")
+        
+
+    if name in [val.name for val in program.procs]:
+        compiler_error(token.loc, f"redefinition of an existing proc keyword`{name}`")
+
+    if name in program.consts:
+        compiler_error(token.loc, f"redefinition of an existing proc keyword`{name}`")
+        compiler_note(program.consts[token.value].loc, f"the first definition is located here")
+
+    if name in macros:
+        assert isinstance(token.value, str)
+        compiler_error(token.loc, f"redefinition of an existing keyword of a macro `{name}`")
+        compiler_note(macros[token.value].loc, f"the first definition is located here")
+
+
 #---------------------------- Intermidate Represention ----------------------------
 
 def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[]) -> Tuple[Program, Dict[str, OpAddr]]:
@@ -779,7 +814,7 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
     program: Program = Program(ops=[], lp_variables=[], memory_capacity=0, procs=[])
     rtokens : List[Token] = list(reversed(tokens))
     macros: Dict[str, Macro] = {}
-    current_proc : Optional[OpAddr] = None
+    current_proc : Optional[Proc] = None
     ip : OpAddr = 0
     while len(rtokens) > 0:
         token : Token = rtokens.pop()
@@ -806,8 +841,17 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                         compiler_error(token.loc, f"macro exansion limit of {EXPANSION_LIMIT} exceeded")
                     continue
             
-            elif token.value in program.memories:
-                op = Op(OpType.PUSH_MEM, token, program.memories[token.value])
+            elif token.value in [val.name for val in program.memories]:
+                space = "global"
+                if current_proc is not None:
+                    space = current_proc.name
+
+                if  current_proc is None:
+                    addr = [ val.addr for val in program.memories if val.space == "global" and val.name == token.value]
+                else:
+                    addr = [ val.addr for val in program.memories if val.space == "global" and val.name == token.value or val.space == current_proc.name and val.name == token.value]
+
+                op = Op(OpType.PUSH_MEM, token, addr)
                 program.ops.append(op)
                 ip += 1
 
@@ -818,7 +862,7 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
             
             elif token.value in program.lp_variables:
                 bindIdx = len(program.lp_variables) - program.lp_variables.index(token.value)
-                print(program.lp_variables, bindIdx, program.lp_variables[-bindIdx])
+                # print(program.lp_variables, bindIdx, program.lp_variables[-bindIdx])
                 op = Op(OpType.PUSH_BIND, token, bindIdx)
                 program.ops.append(op)
                 ip += 1
@@ -828,7 +872,7 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                 program.ops.append(Op(OpType.CALL, token, current_proc_found))
                 ip +=1
             else:
-                print(program.memories,[ tok.text for tok in rtokens])
+                # print(program.memories,[ tok.text for tok in rtokens])
                 compiler_error(token.loc, f"unknown word `{token.text}`")
             
 
@@ -1028,22 +1072,19 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                 if token.type != TokenType.WORD:
                     compiler_error(token.loc, f"expected memory name to be {readable_enum(TokenType.WORD)} but found {readable_enum(token.type)}")
                 
+                check_word_redefinition(token, current_proc, program, macros)
+
                 assert isinstance(token.value, str)
                 memory_name : str = token.value
-                if memory_name in macros:
-                    assert isinstance(token.value, str)
-                    compiler_error(token.loc, f"redefinition of an existing keyword of a macro `{token.value}`", exits=False)
-                    compiler_note(macros[token.value].loc, f"the first definition is located here")
-
-                if memory_name in INTRINSIC_WORDS:
-                    compiler_error(token.loc, f"redefinition of a builtin word `{token.value}`")
-
-                if memory_name in program.memories:
-                    compiler_error(token.loc, f"redefinition of an existing keyword of a memory `{token.value}`", exits=False)
-                    # compiler_note(program.memories[token.value].loc, "the first definition is located here")
+                
 
                 mem_size, program.offset_value = evaluate_constant_from_tokens(rtokens, program.consts, program.offset_value)
-                program.memories[memory_name] = program.memory_capacity
+
+                space = "global"
+                if current_proc is not None:
+                    space = current_proc.name
+
+                program.memories.append( MemData(memory_name, program.memory_capacity, space) )
                 program.memory_capacity += mem_size
 
             elif token.value == Keyword.CONST:
@@ -1054,18 +1095,9 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                 if token.type != TokenType.WORD:
                     compiler_error(token.loc, f"expected constant's name to be {readable_enum(TokenType.WORD)} but found {readable_enum(token.type)}")
 
+                check_word_redefinition(token, current_proc, program, macros)
+
                 const_name = token.value
-
-                if const_name in macros:
-                    assert isinstance(token.value, str)
-                    compiler_error(token.loc, f"redefinition of an existing keyword of a macro `{token.value}`", exits=False)
-                    compiler_note(macros[token.value].loc, f"the first definition is located here")
-
-                if const_name in INTRINSIC_WORDS:
-                    compiler_error(token.loc, f"redefinition of a builtin word `{token.value}`")
-
-                if const_name in program.memories:
-                    compiler_error(token.loc, f"redefinition of an existing keyword of a memory `{token.value}`", exits=False)
                 
                 const_value, program.offset_value = evaluate_constant_from_tokens(rtokens, program.consts, program.offset_value)
                 program.consts[const_name] = const_value
@@ -1074,19 +1106,6 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
             elif token.value == Keyword.LET:
                 if len(rtokens) == 0:
                     compiler_error(token.loc, f"expected indentifer's name but found nothing")
-
-                const_name = token.value
-
-                if const_name in macros:
-                    assert isinstance(token.value, str)
-                    compiler_error(token.loc, f"redefinition of an existing keyword of a macro `{token.value}`", exits=False)
-                    compiler_note(macros[token.value].loc, f"the first definition is located here")
-
-                if const_name in INTRINSIC_WORDS:
-                    compiler_error(token.loc, f"redefinition of a builtin word `{token.value}`")
-
-                if const_name in program.memories:
-                    compiler_error(token.loc, f"redefinition of an existing keyword of a memory `{token.value}`", exits=False)
 
                 rtokens, lp_identifiers = read_till_breaker(rtokens, "in", token.loc)
                 program.lp_variables += lp_identifiers[::-1]
@@ -1097,7 +1116,6 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
 
             elif token.value == Keyword.PROC:
                 if current_proc is None:
-
                     if len(rtokens) == 0:
                         compiler_error(token.loc, "expected procedure name but found nothing")
                     token = rtokens.pop()
@@ -1105,13 +1123,14 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                     if token.type != TokenType.WORD:
                         compiler_error(token.loc, f"expected procedure name to be a word but found {readable_enum(token.type)}")
                     
+                    check_word_redefinition(token, current_proc, program, macros)
+
                     proc_name = token.value
-                    if proc_name in map(lambda x : x.name , program.procs):
-                        compiler_error(token.loc, f"procedure {proc_name} already exists")
 
                     contract = parse_proc_contract(rtokens)
-                    proc = Proc(proc_name, ip + 1, contract)
+                    proc = Proc(proc_name, ip + 1, contract, {})
                     program.procs.append(proc)
+                    current_proc = proc
                     op = Op(type=OpType.SKIP_PROC, token=token, operand=proc)
                     program.ops.append(op)
                     stack.append(ip)
@@ -1129,16 +1148,7 @@ def compile_tokens_to_program(tokens : List[Token], includePaths : List[str]=[])
                 if token.type != TokenType.WORD:
                     sys.exit("%s:%d:%d: ERROR: expected macro name to be %s but found %s" % (token.loc + (readable_enum(TokenType.WORD), readable_enum(token.type))))
 
-                assert isinstance(token.value, str), "This is probably a bug in the lexer"
-                if token.value in macros:
-                    print("%s:%d:%d: ERROR: redefinition of already existing macro `%s`" % (token.loc + (token.value, )))
-                    sys.exit("%s:%d:%d: NOTE: the first definition is located here" % macros[token.value].loc)
-
-                if token.value in INTRINSIC_WORDS:
-                    print("%s:%d:%d: ERROR: redefinition of a builtin word `%s`" % (token.loc + (token.value, )))
-                
-                if token.value in program.memories:
-                    sys.exit("%s:%d:%d: ERROR: redefinition of already existing memory `%s`" % (token.loc + (token.value, )))
+                check_word_redefinition(token, current_proc, program, macros)
 
                 macro = Macro(token.loc, [])
                 macros[token.value] = macro

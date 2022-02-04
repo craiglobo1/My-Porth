@@ -1,36 +1,50 @@
 include "std.porth"
 
-proc hello in
-    "hello\n" stdout
+memory hello 13 end
+
+proc sizeDouble in
+    memory size 13 end
+    size <int> dump
 end
 
-proc world in
-    hello
-    "world\n" stdout
+proc sizeQuad in
+    memory size 13 end
+    size <int> dump
 end
+sizeDouble
+sizeQuad
 
-proc number -- int in
-    23 5 + 10 +
-end 
+// proc hello in
+//     "hello\n" stdout
+// end
 
+// proc world in
+//     hello
+//     "world\n" stdout
+// end
 
-memory a
-    12
-end
-
-// int ptr *ptr+int
-proc increment_by int ptr in
-    dup @32 2over + swap !32 drop
-end
-
-234 a !32
-32 a increment_by
-a @32 dump
+// proc number -- int in
+//     23 5 + 10 +
+// end 
 
 
-memory hello 20 end
+// memory a
+//     12
+// end
 
-// 12 *str *mem
-"Hello world\n" dup strlen hello memcpy
+// // int ptr *ptr+int
+// proc increment_by int ptr in
+//     dup @32 2over + swap !32 drop
+// end
 
-hello stdout
+// 234 a !32
+// 32 a increment_by
+// a @32 dump
+
+
+// memory hello 20 end
+
+// // 12 *str *mem
+// "Hello world\n" dup strlen swap hello memcpy
+
+// hello stdout
