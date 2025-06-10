@@ -4,7 +4,7 @@
 
 ## 🚀 What is Porth?
 
-Porth is a low-level, stack-oriented programming language that mimics the behavior of Forth. It operates on a simple execution model where values are pushed and popped from a stack, and all computation flows through manipulating this stack.
+Porth is a low-level, stack-oriented programming language that mimics the behaviour of Forth. It operates on a simple execution model where values are pushed and popped from a stack, and all computation flows through manipulating this stack.
 
 ## 📦 Features
 
